@@ -41,9 +41,6 @@ default_bracelets = [
 default_measurements = []
 default_td_data = {}
 
-# Глобальный пул потоков (используем нижеследующую переменную)
-executor = None
-
 
 def ensure_file(filename, default_data):
     """Создает файл с исходными данными, если он отсутствует."""
@@ -70,7 +67,8 @@ def backup_files():
 def fetch_data(dev_id, start_override=None):
     """
     Запрашивает данные для dev_id.
-    Если start_override задан (datetime), используется интервал [start_override, start_override + TIME_FETCH_SEC].
+    Если start_override задан (datetime), используется интервал
+    [start_override, start_override + TIME_FETCH_SEC].
     Иначе интервал вычисляется как [now - TIME_FETCH_SEC, now].
     Выводит:
       Q: URL запроса
@@ -91,8 +89,8 @@ def fetch_data(dev_id, start_override=None):
 
     try:
         resp = requests.get(API_URL, params=params, timeout=10)
-    except requests.RequestException as e:
-        print(f"[{dev_id}] ERR: {e}")
+    except requests.exceptions.RequestException:
+        print(f"[{dev_id}] Ошибка: Сервер недоступен")
         return []
 
     print(f"[{dev_id}] Q: {resp.url}")
@@ -123,7 +121,6 @@ def fetch_data(dev_id, start_override=None):
 
 def main():
     """Основной цикл: сбор данных и обновление файлов."""
-    global executor
     print("Старт.")
 
     try:
@@ -147,9 +144,7 @@ def main():
     else:
         current_start = None
 
-    executor = ThreadPoolExecutor(max_workers=5)
-
-    try:
+    with ThreadPoolExecutor(max_workers=5) as executor:
         while True:
             all_meas = []
             td_data = {}
@@ -192,20 +187,12 @@ def main():
             if USE_FIXED_START:
                 current_start += timedelta(seconds=TIME_FETCH_SEC)
             time.sleep(FETCH_INTERVAL_SEC)
-    finally:
-        # print("Ожидание завершения потоков...")
-        executor.shutdown(wait=True)
-        # print("Пул завершен.")
 
 
 def signal_handler(_sig, _frame):
-    """Обработчик Ctrl+C: бэкап и ожидание завершения потоков, затем выход."""
+    """Обработчик Ctrl+C: бэкап и выход."""
     print("\nCtrl+C. Бэкап...")
     backup_files()
-    if executor:
-        print("Ожидание завершения потоков...")
-        executor.shutdown(wait=True)
-        print("Пул завершен.")
     sys.exit(0)
 
 
