@@ -1,8 +1,0 @@
-{
-  "time_fetch_start_shift": 40,
-  "time_fetch_end_shift": 30,
-  "need_update_screen": true,
-  "need_update_translation": true,
-  "nice_data": false,
-  "peak_treshhold": 350
-}

@@ -60,8 +60,8 @@ def backup_files():
         try:
             shutil.copy(fn, bp)
             print(f"Бэкап {fn} -> {bp}")
-        except Exception as e:
-            print(f"Бэкап {fn} ошибка: {e}")
+        except (OSError, IOError) as e:
+            print(f"Ошибка при копировании: {e}")
 
 
 def fetch_data(dev_id, start_override=None):
@@ -126,8 +126,14 @@ def main():
     try:
         with open(BRACELETS_FILE, "r", encoding="utf-8") as f:
             bracelets = json.load(f)
-    except Exception as e:
-        print(f"Ошибка {BRACELETS_FILE}: {e}")
+    except FileNotFoundError as e:
+        print(f"Файл {BRACELETS_FILE} не найден: {e}")
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"Ошибка в формате JSON файла {BRACELETS_FILE}: {e}")
+        sys.exit(1)
+    except PermissionError as e:
+        print(f"Нет доступа к файлу {BRACELETS_FILE}: {e}")
         sys.exit(1)
 
     if not bracelets:
@@ -161,8 +167,11 @@ def main():
                 dev = futures[fut]
                 try:
                     res = fut.result()
-                except Exception as ex:
-                    print(f"[{dev}] exc: {ex}")
+                except TimeoutError as ex:
+                    print(f"[{dev}] Ошибка: Превышено время ожидания: {ex}")
+                    continue
+                except Exception as ex:  # pylint: disable=broad-exception-caught
+                    print(f"[{dev}] Неизвестная ошибка: {ex}")
                     continue
                 if res:
                     all_meas.extend(res)
@@ -171,7 +180,11 @@ def main():
             try:
                 with open(MEASUREMENTS_FILE, "r", encoding="utf-8") as f:
                     hist = json.load(f)
-            except Exception:
+            except FileNotFoundError:
+                print("Файл не найден, инициализируем пустой список")
+                hist = []
+            except json.JSONDecodeError:
+                print("Ошибка в формате JSON, инициализируем пустой список")
                 hist = []
             hist.extend(all_meas)
             with open(MEASUREMENTS_FILE, "w", encoding="utf-8") as f:
