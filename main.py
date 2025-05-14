@@ -48,7 +48,7 @@ default_bracelets = [
 default_measurements = []  # пустой список измерений
 default_td_data = {}       # пустой словарь для TouchDesigner
 
-# Глобальный пул потоков (будет создан в main)
+# Глобальный пул потоков (будет создан в main())
 global_executor = None
 
 # ==========================
@@ -101,8 +101,8 @@ def fetch_data(device_name, start_time_override=None):
     Иначе используется интервал от текущего момента минус TIME_FETCH_SECONDS до текущего момента.
 
     Выводит в консоль:
-      - GET запрос (поле "Запрос")
-      - Ответ сервера (поле "Ответ")
+      - GET-запрос (полное значение URL)
+      - Ответ сервера (полная структура JSON)
 
     Возвращает список измерений или пустой список, если данные отсутствуют.
     """
@@ -121,7 +121,6 @@ def fetch_data(device_name, start_time_override=None):
         "start": formatted_start,
         "end": formatted_end
     }
-
     try:
         response = requests.get(API_URL, params=params, timeout=10)
     except requests.RequestException as e:
@@ -139,7 +138,7 @@ def fetch_data(device_name, start_time_override=None):
 
     print(f"[{device_name}] Ответ: {data}")
 
-    # Если получен ответ со специальным сообщением, считаем, что данных нет.
+    # Если ответ содержит специальное сообщение, сигнализирующее об отсутствии данных:
     if data.get("message") == "No data found for the specified device.":
         return []
     if not data.get("hr") and not data.get("si"):
@@ -206,7 +205,6 @@ def main():
                 ): bracelet.get("swaid_id")
                 for bracelet in bracelets if bracelet.get("swaid_id")
             }
-
             for future in as_completed(future_to_device):
                 device_id = future_to_device[future]
                 try:
@@ -219,11 +217,16 @@ def main():
                     # Сохраняем последнее измерение для данного браслета
                     td_data[device_id] = measurements[-1]
 
-            # Сохраняем историю измерений (перезаписываем файл новыми данными каждого цикла)
+            # Читаем существующую историю измерений и добавляем новые данные
+            try:
+                with open(MEASUREMENTS_FILE, "r", encoding="utf-8") as f:
+                    history = json.load(f)
+            except Exception:
+                history = []
+            history.extend(all_measurements)
             with open(MEASUREMENTS_FILE, "w", encoding="utf-8") as f:
-                json.dump(all_measurements, f, indent=2)
+                json.dump(history, f, indent=2)
 
-            # Обновляем данные для TouchDesigner
             with open(TD_DATA_FILE, "w", encoding="utf-8") as f:
                 json.dump(td_data, f, indent=2)
 
