@@ -5,15 +5,16 @@
 TouchDesigner. При прерывании (Ctrl+C) создаются резервные копии файлов.
 """
 
-import os
-import sys
 import json
+import os
 import shutil
-import requests
 import signal
+import sys
 import time
-from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta, timezone
+
+import requests
 
 # ==========================
 # Настраиваемые параметры (конфигурация)
@@ -44,6 +45,8 @@ default_td_data = {}       # пустой словарь для TouchDesigner
 # ==========================
 # Функция для создания файла, если он отсутствует
 # ==========================
+
+
 def ensure_file(filename, default_data):
     """Если файла нет, создает его с переданными данными по умолчанию."""
     if not os.path.exists(filename):
@@ -71,7 +74,8 @@ def backup_files():
         )
         try:
             shutil.copy(filename, backup_filename)
-            print(f"Резервная копия файла {filename} создана как {backup_filename}")
+            print(
+                f"Резервная копия файла {filename} создана как {backup_filename}")
         except Exception as e:
             print(f"Ошибка при создании резервной копии {filename}: {e}")
 

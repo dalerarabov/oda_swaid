@@ -1,3 +1,9 @@
+# Папки
+/backup/
 .venv/
 __pycache__/
+
+# Файлы
 *.pyc
+*.log
+*.tmp
