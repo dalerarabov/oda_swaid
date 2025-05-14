@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Скрипт принимает данные с удалённого сервера для каждого браслета,
-сохраняет их в локальные JSON-файлы и обновляет файл с данными для
-TouchDesigner. При прерывании (Ctrl+C) создаются резервные копии файлов.
+сохраняет их в локальные JSON-файлы и обновляет файл с данными для TouchDesigner.
+При прерывании (Ctrl+C) выполняется резервное копирование файлов и явное завершение пула потоков.
 """
 
 import json
@@ -21,8 +21,14 @@ import requests
 # ==========================
 API_URL = "http://157.230.95.209:30003/get_ppg_data"
 MY_TIMEZONE = timezone(timedelta(hours=3))  # часовой пояс UTC+3
-TIME_FETCH_MINUTES = 5       # интервал запроса данных (в минутах)
+TIME_FETCH_SECONDS = 1  # интервал для запроса данных (в секундах)
 FETCH_INTERVAL_SECONDS = 5  # интервал между опросами (в секундах)
+
+# Режим выбора даты начала опроса:
+# Если USE_FIXED_START_DATE = False, опрос идёт от текущего момента.
+# Если True, используется фиксированная дата, указанная в FIXED_START_DATE.
+USE_FIXED_START_DATE = True
+FIXED_START_DATE = "2024-11-03-00-23-13"  # формат: %Y-%m-%d-%H-%M-%S
 
 # Имена файлов для хранения данных
 BRACELETS_FILE = "bracelets.json"        # список браслетов
@@ -42,20 +48,23 @@ default_bracelets = [
 default_measurements = []  # пустой список измерений
 default_td_data = {}       # пустой словарь для TouchDesigner
 
+# Глобальный пул потоков (будет создан в main)
+global_executor = None
+
 # ==========================
 # Функция для создания файла, если он отсутствует
 # ==========================
 
 
 def ensure_file(filename, default_data):
-    """Если файла нет, создает его с переданными данными по умолчанию."""
+    """Если файла нет, создаёт его с данными по умолчанию."""
     if not os.path.exists(filename):
-        with open(filename, 'w') as f:
+        with open(filename, "w", encoding="utf-8") as f:
             json.dump(default_data, f, indent=2)
         print(f"Создан файл {filename}")
 
 
-# Проверяем наличие файлов и создаём их, если нужно
+# Проверяем наличие файлов и создаём их при необходимости
 ensure_file(BRACELETS_FILE, default_bracelets)
 ensure_file(MEASUREMENTS_FILE, default_measurements)
 ensure_file(TD_DATA_FILE, default_td_data)
@@ -65,7 +74,7 @@ ensure_file(TD_DATA_FILE, default_td_data)
 # Функция для создания резервных копий файлов
 # ==========================
 def backup_files():
-    """Создает резервные копии всех файлов в папке BACKUP_DIR."""
+    """Создаёт резервные копии всех файлов в папке BACKUP_DIR."""
     os.makedirs(BACKUP_DIR, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     for filename in [BRACELETS_FILE, MEASUREMENTS_FILE, TD_DATA_FILE]:
@@ -74,8 +83,7 @@ def backup_files():
         )
         try:
             shutil.copy(filename, backup_filename)
-            print(
-                f"Резервная копия файла {filename} создана как {backup_filename}")
+            print(f"Резервная копия {filename} создана как {backup_filename}")
         except Exception as e:
             print(f"Ошибка при создании резервной копии {filename}: {e}")
 
@@ -83,35 +91,64 @@ def backup_files():
 # ==========================
 # Функция для запроса данных для заданного браслета
 # ==========================
-def fetch_data(device_name):
+def fetch_data(device_name, start_time_override=None):
     """
-    Отправляет GET-запрос к API для заданного браслета (device_name)
-    и возвращает список измерений.
+    Отправляет GET-запрос к API для заданного устройства (device_name).
+
+    Если start_time_override задан (тип datetime), используется интервал:
+      start_time = start_time_override
+      end_time = start_time_override + TIME_FETCH_SECONDS.
+    Иначе используется интервал от текущего момента минус TIME_FETCH_SECONDS до текущего момента.
+
+    Выводит в консоль:
+      - GET запрос (поле "Запрос")
+      - Ответ сервера (поле "Ответ")
+
+    Возвращает список измерений или пустой список, если данные отсутствуют.
     """
-    current_time = datetime.now(MY_TIMEZONE)
-    start_time = current_time - timedelta(minutes=TIME_FETCH_MINUTES)
-    end_time = current_time
+    if start_time_override is not None:
+        start_time = start_time_override
+        end_time = start_time + timedelta(seconds=TIME_FETCH_SECONDS)
+    else:
+        current_time = datetime.now(MY_TIMEZONE)
+        start_time = current_time - timedelta(seconds=TIME_FETCH_SECONDS)
+        end_time = current_time
 
     formatted_start = start_time.strftime("%Y-%m-%d-%H-%M-%S")
     formatted_end = end_time.strftime("%Y-%m-%d-%H-%M-%S")
-
     params = {
         "device_name": device_name,
         "start": formatted_start,
         "end": formatted_end
     }
-    print(f"[{device_name}] Запрос с параметрами: {params}")
+
     try:
         response = requests.get(API_URL, params=params, timeout=10)
-        response.raise_for_status()
     except requests.RequestException as e:
         print(f"[{device_name}] Ошибка получения данных: {e}")
         return []
 
-    data = response.json()
+    url_str = response.url
+    print(f"[{device_name}] Запрос: {url_str}")
+
+    try:
+        data = response.json()
+    except Exception as e:
+        print(f"[{device_name}] Ошибка декодирования JSON: {e}")
+        return []
+
+    print(f"[{device_name}] Ответ: {data}")
+
+    # Если получен ответ со специальным сообщением, считаем, что данных нет.
+    if data.get("message") == "No data found for the specified device.":
+        return []
+    if not data.get("hr") and not data.get("si"):
+        print(f"[{device_name}] Нет данных для указанного промежутка времени.")
+        return []
+
     measurements = []
     for hr, si, ts in zip(data.get("hr", []), data.get("si", []), data.get("time", [])):
-        ts_clean = ts.split('.')[0]  # удаляем микросекунды, если есть
+        ts_clean = ts.split(".")[0]  # удаляем микросекунды, если есть
         measurements.append({
             "timestamp": ts_clean,
             "hr": hr,
@@ -125,31 +162,51 @@ def fetch_data(device_name):
 # Основной цикл получения данных
 # ==========================
 def main():
-    """Основной цикл: для каждого браслета запрашивает данные и обновляет файлы."""
+    """Основной цикл получает данные для каждого браслета и обновляет локальные файлы."""
+    global global_executor
     print("Запуск скрипта получения данных.")
 
-    # Загрузить список браслетов
     try:
-        with open(BRACELETS_FILE, 'r') as f:
+        with open(BRACELETS_FILE, "r", encoding="utf-8") as f:
             bracelets = json.load(f)
     except Exception as e:
         print(f"Ошибка загрузки {BRACELETS_FILE}: {e}")
         sys.exit(1)
 
     if not bracelets:
-        print("Список браслетов пуст. Добавьте как минимум один браслет в bracelets.json.")
+        print("Список браслетов пуст. Добавьте хотя бы один браслет в bracelets.json.")
         sys.exit(1)
 
-    while True:
-        all_measurements = []
-        td_data = {}
+    fixed_mode = USE_FIXED_START_DATE
+    if fixed_mode:
+        try:
+            current_fixed_start = datetime.strptime(
+                FIXED_START_DATE, "%Y-%m-%d-%H-%M-%S")
+            current_fixed_start = current_fixed_start.replace(
+                tzinfo=MY_TIMEZONE)
+        except ValueError as e:
+            print(f"Ошибка формата FIXED_START_DATE: {e}")
+            sys.exit(1)
+    else:
+        current_fixed_start = None
 
-        # Параллельный запрос данных для всех браслетов
-        with ThreadPoolExecutor(max_workers=5) as executor:
+    # Создаем глобальный пул потоков
+    global_executor = ThreadPoolExecutor(max_workers=5)
+
+    try:
+        while True:
+            all_measurements = []
+            td_data = {}
+
             future_to_device = {
-                executor.submit(fetch_data, bracelet.get("swaid_id")): bracelet.get("swaid_id")
+                global_executor.submit(
+                    fetch_data,
+                    bracelet.get("swaid_id"),
+                    current_fixed_start if fixed_mode else None
+                ): bracelet.get("swaid_id")
                 for bracelet in bracelets if bracelet.get("swaid_id")
             }
+
             for future in as_completed(future_to_device):
                 device_id = future_to_device[future]
                 try:
@@ -162,35 +219,39 @@ def main():
                     # Сохраняем последнее измерение для данного браслета
                     td_data[device_id] = measurements[-1]
 
-        # Обновляем историю измерений
-        try:
-            with open(MEASUREMENTS_FILE, 'r') as f:
-                history = json.load(f)
-        except Exception:
-            history = []
+            # Сохраняем историю измерений (перезаписываем файл новыми данными каждого цикла)
+            with open(MEASUREMENTS_FILE, "w", encoding="utf-8") as f:
+                json.dump(all_measurements, f, indent=2)
 
-        history.extend(all_measurements)
-        with open(MEASUREMENTS_FILE, 'w') as f:
-            json.dump(history, f, indent=2)
+            # Обновляем данные для TouchDesigner
+            with open(TD_DATA_FILE, "w", encoding="utf-8") as f:
+                json.dump(td_data, f, indent=2)
 
-        # Обновляем данные для TouchDesigner
-        with open(TD_DATA_FILE, 'w') as f:
-            json.dump(td_data, f, indent=2)
+            print(
+                f"Обработано {len(bracelets)} устройств. Получено {len(all_measurements)} новых записей."
+            )
+            print("Ожидание следующего опроса...\n")
 
-        print(
-            f"Обработано {len(bracelets)} устройств. "
-            f"Получено {len(all_measurements)} новых записей."
-        )
-        print("Ожидание следующего опроса...\n")
-        time.sleep(FETCH_INTERVAL_SECONDS)
+            if fixed_mode:
+                current_fixed_start += timedelta(seconds=TIME_FETCH_SECONDS)
+
+            time.sleep(FETCH_INTERVAL_SECONDS)
+    finally:
+        # Явное завершение пула потоков перед выходом
+        global_executor.shutdown(wait=True)
+        print("Пул потоков был завершён.")
 
 
 # ==========================
 # Обработка прерывания (Ctrl+C)
 # ==========================
-def signal_handler(signum, frame):
+def signal_handler(_signum, _frame):
+    """Обработчик сигнала прерывания, выполняет резервное копирование файлов и завершение работы."""
     print("\nПолучен сигнал завершения (Ctrl+C). Выполняется резервное копирование файлов...")
     backup_files()
+    if global_executor is not None:
+        global_executor.shutdown(wait=True)
+        print("Пул потоков был завершён.")
     sys.exit(0)
 
 
@@ -200,5 +261,8 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         backup_files()
+        if global_executor is not None:
+            global_executor.shutdown(wait=True)
+            print("Пул потоков был завершён.")
         print("Прерывание работы. Завершаем работу.")
         sys.exit(0)
