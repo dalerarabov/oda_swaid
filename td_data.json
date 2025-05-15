@@ -1,1 +1,11 @@
-{}
+{
+  "1505_CE:D6:AD:45:ED:75": {
+    "timestamp": "2025-05-15 14:50:49",
+    "hr": 81,
+    "lf_hf_ratio": 1,
+    "rmssd": 104,
+    "sdrr": 78,
+    "si": 241,
+    "device_name": "1505_CE:D6:AD:45:ED:75"
+  }
+}
