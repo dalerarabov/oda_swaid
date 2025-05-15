@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 # Параметры
 API_URL = "http://157.230.95.209:30003/get_ppg_data"
 MY_TZ = timezone(timedelta(hours=3))
-TIME_FETCH_SEC = 300
-FETCH_INTERVAL_SEC = 10
+TIME_FETCH_SEC = 60
+FETCH_INTERVAL_SEC = 5
 
 USE_FIXED_START = False
 FIXED_START = "2025-05-15-16-23-00"
@@ -130,10 +130,9 @@ def fetch_data(
     s_end = end_time.strftime("%Y-%m-%d-%H-%M-%S")
     params = {"device_name": device_name, "start": s_start, "end": s_end}
 
-    params_str = params
-
-    # params_str = str(params)[:50] + \
-    #    "..." if len(str(params)) > 50 else str(params)
+    # Ограничиваем длину лога параметров
+    params_str = str(params)[:50] + \
+                     "..." if len(str(params)) > 50 else str(params)
     logger.info("[%s] Запрос: %s", device_name, params_str)
     try:
         response = requests.get(API_URL, params=params, timeout=10)
@@ -150,14 +149,15 @@ def fetch_data(
     except json.JSONDecodeError as error:
         return handle_fetch_error(device_name, error, start_request_time, end_request_time)
 
-    if data.get("message") == "No data found for the specified device.":
-        logger.info("[%s] Данные не найдены", device_name)
+    if data.get("message") == "No data found for the specified device."):
+                logger.info("[%s] Данные не найдены", device_name)
         return [], start_request_time, end_request_time
     if not any(data.get(key) for key in ["hr", "lf_hf_ratio", "rmssd", "sdrr", "si"]):
-        logger.warning("[%s] Пустой набор данных", device_name)
+                logger.warning("[%s] Пустой набор данных", device_name)
         return [], start_request_time, end_request_time
 
-    measurements: List[Measurement] = [
+    measurements:
+        List[Measurement] = [
         {
             "timestamp": ts,
             "hr": hr,
@@ -176,37 +176,36 @@ def fetch_data(
             data.get("time", [])
         )
     ]
-    logger.info("[%s] Получено %d измерений", device_name, len(measurements))
-    return measurements, start_request_time, end_request_time
+        logger.info("[%s] Получено %d измерений", device_name, len(measurements))
+        return measurements, start_request_time, end_request_time
 
-
-def load_bracelets() -> List[Dict]:
+    def load_bracelets() -> List[Dict]:
     """Загружает список браслетов из файла."""
     try:
-        with open(BRACELETS_FILE, "r", encoding="utf-8") as file:
-            bracelets = json.load(file)
+    with open(BRACELETS_FILE, "r", encoding="utf-8") as file:
+    bracelets = json.load(file)
         logger.info("Загружено %d браслетов из %s",
                     len(bracelets), BRACELETS_FILE)
         for bracelet in bracelets:
-            logger.info(
-                " - %s (%s)",
+    logger.info(
+               " - %s (%s)",
                 bracelet.get("name", "Без имени"),
                 bracelet.get("mac_address", "Без MAC")
             )
-        return bracelets
-    except (FileNotFoundError, json.JSONDecodeError, PermissionError) as error:
-        logger.error("Ошибка загрузки %s: %s", BRACELETS_FILE, error)
-        sys.exit(1)
+            return bracelets
+            except (FileNotFoundError, json.JSONDecodeError, PermissionError) as error:
+            logger.error("Ошибка загрузки %s: %s", BRACELETS_FILE, error)
+            sys.exit(1)
 
-
-def format_table(
+            def format_table(
     measurements: List[Measurement],
     start_time: Optional[datetime],
     end_time: Optional[datetime]
+
 ) -> str:
     """Форматирует данные в таблицу с 8 строками и колонкой Mark."""
-    headers = ["Mark", "Time", "Device", "HR", "LF/HF", "RMSSD", "SDRR", "SI"]
-    table = []
+    headers= ["Mark", "Time", "Device", "HR", "LF/HF", "RMSSD", "SDRR", "SI"]
+    table= []
 
     table.append([
         "Start",
@@ -214,7 +213,7 @@ def format_table(
         "", "", "", "", "", ""
     ])
 
-    measurement_rows = measurements[:5]
+    measurement_rows= measurements[:5]
     for idx, measurement in enumerate(measurement_rows, 1):
         table.append([
             str(idx),
@@ -236,59 +235,57 @@ def format_table(
         "", "", "", "", "", ""
     ])
 
-    current_time = datetime.now(MY_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    current_time= datetime.now(MY_TZ).strftime("%Y-%m-%d %H:%M:%S")
     table.append(["Now", current_time, "", "", "", "", "", ""])
 
     return tabulate(
-        table,
-        headers=headers,
-        tablefmt="grid",
-        maxcolwidths=[8, 20, 20, 10, 10, 10, 10, 10]
+       table,
+        headers = headers,
+        tablefmt = "grid",
+        maxcolwidths = [8, 20, 20, 10, 10, 10, 10, 10]
     )
 
-
-def fetch_and_process_data(
+    def fetch_and_process_data(
     session_name: str,
     bracelets: List[Dict],
     current_start: Optional[datetime],
     executor: ThreadPoolExecutor
 ) -> Tuple[List[Measurement], Dict, Optional[datetime], Optional[datetime]]:
     """Выполняет запросы к серверу."""
-    all_measurements: List[Measurement] = []
-    td_data: Dict = {}
-    earliest_start = None
-    latest_end = None
+    all_measurements: List[Measurement]= []
+    td_data: Dict= {}
+    earliest_start= None
+    latest_end= None
 
     logger.info("Запуск пула для %d браслетов", len(bracelets))
-    futures = {
-        executor.submit(fetch_data, session_name, b.get("mac_address", ""), current_start): b
+    futures= {
+       executor.submit(fetch_data, session_name, b.get("mac_address"), current_start): b
         for b in bracelets if b.get("mac_address")
     }  # pylint: disable=cell-var-from-loop
 
-    for future in as_completed(futures):
-        bracelet = futures[future]
+        for future in as_completed(futures):
+    bracelet = futures[future]
         device_name = f"{session_name}_{bracelet.get('mac_address')}"
         try:
-            measurements, start_time, end_time = future.result()
+    measurements, start_time, end_time = future.result()
             if measurements:
-                all_measurements.extend(measurements)
+    all_measurements.extend(measurements)
                 td_data[device_name] = measurements[-1]
                 if earliest_start is None or (start_time and start_time < earliest_start):
-                    earliest_start = start_time
+    earliest_start = start_time
                 if latest_end is None or (end_time and end_time > latest_end):
-                    latest_end = end_time
+    latest_end = end_time
         except Exception as error:
-            logger.error(
-                "[%s] Ошибка обработки: %s\n%s",
+    logger.error(
+               "[%s] Ошибка обработки: %s\n%s",
                 device_name,
                 error,
                 "".join(traceback.format_tb(error.__traceback__))
             )
 
-    return all_measurements, td_data, earliest_start, latest_end
+            return all_measurements, td_data, earliest_start, latest_end
 
-
-def save_data(
+            def save_data(
     history: List[Measurement],
     new_measurements: List[Measurement],
     td_data: Dict,
@@ -303,7 +300,7 @@ def save_data(
         logger.info("Добавлено %d записей в %s", len(
             new_measurements), MEASUREMENTS_FILE)
         if start_time and end_time:
-            table = format_table(new_measurements, start_time, end_time)
+            table= format_table(new_measurements, start_time, end_time)
             print(f"\n{table}\n")
         else:
             logger.warning("Таблица не выведена: нет временных меток")
@@ -311,31 +308,28 @@ def save_data(
     with open(TD_DATA_FILE, "w", encoding="utf-8") as file:
         json.dump(td_data, file, indent=2)
 
-
-def main() -> None:
+    def main() -> None:
     """Основной цикл программы."""
-    parser = argparse.ArgumentParser(description="Получение данных с сервера")
+    parser= argparse.ArgumentParser(description="Получение данных с сервера")
     parser.add_argument("--session_name", help="Название сессии")
-    args = parser.parse_args()
+    args= parser.parse_args()
 
-    session_name = args.session_name or input(
-        "Введите название сессии: ").strip()
+    session_name= args.session_name or input("Введите название сессии: ").strip()
     if not session_name:
         logger.error("Название сессии не задано")
         sys.exit(1)
 
     logger.info("Запуск с сессией: %s", session_name)
 
-    bracelets = load_bracelets()
+    bracelets= load_bracelets()
     if not bracelets:
         logger.error("Список браслетов пуст")
         sys.exit(1)
 
-    current_start = None
+    current_start= None
     if USE_FIXED_START:
         try:
-            current_start = datetime.strptime(
-                FIXED_START, "%Y-%m-%d-%H-%M-%S").replace(tzinfo=MY_TZ)
+            current_start= datetime.strptime(FIXED_START, "%Y-%m-%d-%H-%M-%S").replace(tzinfo=MY_TZ)
             logger.info("Фиксированное время: %s", FIXED_START)
         except ValueError as error:
             logger.error("Ошибка формата FIXED_START: %s", error)
@@ -345,52 +339,50 @@ def main() -> None:
 
     try:
         with open(MEASUREMENTS_FILE, "r", encoding="utf-8") as file:
-            history: List[Measurement] = json.load(file)
+            history: List[Measurement]= json.load(file)
         logger.info("Загружено %d измерений", len(history))
     except (FileNotFoundError, json.JSONDecodeError):
-        history: List[Measurement] = []
+        history: List[Measurement]= []
         logger.info("Файл %s не найден, создан пустой", MEASUREMENTS_FILE)
 
-    max_workers = min(len(bracelets), 5)
+    max_workers= min(len(bracelets), 5)
     logger.info("Пул потоков: %d рабочих", max_workers)
-    executor = ThreadPoolExecutor(max_workers=max_workers)
+    executor= ThreadPoolExecutor(max_workers=max_workers)
     try:
         while True:
             logger.info("Новый цикл для %d браслетов", len(bracelets))
-            new_measurements, td_data, start_time, end_time = fetch_and_process_data(
-                session_name, bracelets, current_start, executor
+            new_measurements, td_data, start_time, end_time= fetch_and_process_data(
+               session_name, bracelets, current_start, executor
             )
-            save_data(history, new_measurements, td_data, start_time, end_time)
+                save_data(history, new_measurements, td_data, start_time, end_time)
 
-            logger.info("Цикл завершен: %d записей", len(new_measurements))
-            print("")
-            if USE_FIXED_START and current_start:
-                current_start += timedelta(seconds=TIME_FETCH_SEC)
-            time.sleep(FETCH_INTERVAL_SEC)
-    except KeyboardInterrupt:
-        logger.info("Завершение: закрытие пула")
-        executor.shutdown(wait=True)
-        raise
-    finally:
-        logger.info("Закрытие пула потоков")
-        executor.shutdown(wait=True)
+                logger.info("Цикл завершен: %d записей", len(new_measurements))
+                print("")
+                if USE_FIXED_START and current_start:
+            current_start += timedelta(seconds=TIME_FETCH_SEC)
+                time.sleep(FETCH_INTERVAL_SEC)
+            except KeyboardInterrupt:
+            logger.info("Завершение: закрытие пула")
+            executor.shutdown(wait=True)
+            raise
+            finally:
+            logger.info("Закрытие пула потоков")
+            executor.shutdown(wait=True)
 
+            def signal_handler(_sig: int, _frame: Optional[object]) -> None:
+            """Обработчик Ctrl+C."""
+            logger.info("Ctrl+C: создание бэкапов")
+            backup_files()
+            sys.exit(0)
 
-def signal_handler(_sig: int, _frame: Optional[object]) -> None:
-    """Обработчик Ctrl+C."""
-    logger.info("Ctrl+C: создание бэкапов")
-    backup_files()
-    sys.exit(0)
-
-
-if __name__ == "__main__":
-    signal.signal(signal.SIGINT, signal_handler)
-    ensure_file(BRACELETS_FILE, DEFAULT_BRACELETS)
-    ensure_file(MEASUREMENTS_FILE, DEFAULT_MEASUREMENTS)
-    ensure_file(TD_DATA_FILE, DEFAULT_TD_DATA)
-    try:
-        main()
-    except Exception as error:
-        logger.error("Критическая ошибка: %s", error)
-        backup_files()
+            if __name__ == "__main__":
+            signal.signal(signal.SIGINT, signal_handler)
+            ensure_file(BRACELETS_FILE, DEFAULT_BRACELETS)
+            ensure_file(MEASUREMENTS_FILE, DEFAULT_MEASUREMENTS)
+            ensure_file(TD_DATA_FILE, DEFAULT_TD_DATA)
+            try:
+            main()
+            except Exception as error:
+            logger.error("Критическая ошибка: %s", error)
+            backup_files()
         sys.exit(1)
