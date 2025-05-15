@@ -65,7 +65,7 @@ def backup_files():
     for filename in [BRACELETS_FILE, MEASUREMENTS_FILE, TD_DATA_FILE]:
         if os.path.exists(filename):
             base_name = os.path.splitext(filename)[0]
-            backup_filename = f"{base_name}_bp_{timestamp}.json"
+            backup_filename = "%s_bp_%s.json" % (base_name, timestamp)
             backup_path = os.path.join(BACKUP_DIR, backup_filename)
             try:
                 shutil.copy(filename, backup_path)
@@ -80,7 +80,7 @@ def fetch_data(session_name, mac_address, start_override=None):
     """
     Запрашивает данные для устройства с сервера.
     """
-    device_name = f"{session_name}_{mac_address}"
+    device_name = "%s_%s" % (session_name, mac_address)
     if not mac_address:
         logger.warning(
             "Пропущен запрос для %s: отсутствует MAC-адрес", device_name)
@@ -164,28 +164,27 @@ def load_bracelets():
         sys.exit(1)
 
 
-def fetch_and_process_data(session_name, bracelets, current_start):
+def fetch_and_process_data(session_name, bracelets, current_start, executor):
     """Выполняет запросы к серверу и обрабатывает данные."""
     all_measurements = []
     td_data = {}
-    max_workers = min(len(bracelets), 5)  # Оптимизация потоков
 
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(fetch_data, session_name, b.get("mac_address"), current_start): b
-            for b in bracelets if b.get("mac_address")
-        }
+    logger.info("Запуск пула потоков для %d браслетов", len(bracelets))
+    futures = {
+        executor.submit(fetch_data, session_name, b.get("mac_address"), current_start): b
+        for b in bracelets if b.get("mac_address")
+    }
 
-        for future in as_completed(futures):
-            bracelet = futures[future]
-            device_name = f"{session_name}_{bracelet.get('mac_address')}"
-            try:
-                result = future.result()
-                if result:
-                    all_measurements.extend(result)
-                    td_data[device_name] = result[-1]
-            except Exception as e:
-                logger.error("[%s] Ошибка обработки: %s", device_name, e)
+    for future in as_completed(futures):
+        bracelet = futures[future]
+        device_name = "%s_%s" % (session_name, bracelet.get('mac_address'))
+        try:
+            result = future.result()
+            if result:
+                all_measurements.extend(result)
+                td_data[device_name] = result[-1]
+        except Exception as e:
+            logger.error("[%s] Ошибка обработки: %s", device_name, e)
 
     return all_measurements, td_data
 
@@ -248,19 +247,30 @@ def main():
         logger.info(
             "Файл %s не найден, инициализирован пустой список", MEASUREMENTS_FILE)
 
-    # Основной цикл
-    while True:
-        logger.info(
-            "Начинаем новый цикл запросов для %d браслетов", len(bracelets))
-        new_measurements, td_data = fetch_and_process_data(
-            session_name, bracelets, current_start)
-        save_data(history, new_measurements, td_data)
+    # Создание пула потоков один раз
+    max_workers = min(len(bracelets), 5)
+    logger.info("Инициализация пула потоков с %d рабочими", max_workers)
+    executor = ThreadPoolExecutor(max_workers=max_workers)
+    try:
+        while True:
+            logger.info(
+                "Начинаем новый цикл запросов для %d браслетов", len(bracelets))
+            new_measurements, td_data = fetch_and_process_data(
+                session_name, bracelets, current_start, executor)
+            save_data(history, new_measurements, td_data)
 
-        logger.info("Итог цикла: получено %d новых записей",
-                    len(new_measurements))
-        if USE_FIXED_START and current_start:
-            current_start += timedelta(seconds=TIME_FETCH_SEC)
-        time.sleep(FETCH_INTERVAL_SEC)
+            logger.info("Итог цикла: получено %d новых записей",
+                        len(new_measurements))
+            if USE_FIXED_START and current_start:
+                current_start += timedelta(seconds=TIME_FETCH_SEC)
+            time.sleep(FETCH_INTERVAL_SEC)
+    except KeyboardInterrupt:
+        logger.info("Получен сигнал завершения, закрытие пула потоков")
+        executor.shutdown(wait=True)  # Явное завершение пула
+        raise  # Передаём исключение в обработчик
+    finally:
+        logger.info("Окончательное закрытие пула потоков")
+        executor.shutdown(wait=True)  # Дополнительная страховка
 
 
 def signal_handler(_sig, _frame):
@@ -275,4 +285,9 @@ if __name__ == "__main__":
     ensure_file(BRACELETS_FILE, DEFAULT_BRACELETS)
     ensure_file(MEASUREMENTS_FILE, DEFAULT_MEASUREMENTS)
     ensure_file(TD_DATA_FILE, DEFAULT_TD_DATA)
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.error("Критическая ошибка: %s", e)
+        backup_files()
+        sys.exit(1)
