@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Tuple, Optional, TypedDict
 import logging
 from tabulate import tabulate
+import urllib.parse
 
 import requests
 
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 API_URL = "http://157.230.95.209:30003/get_ppg_data"
 MY_TZ = timezone(timedelta(hours=3))
 TIME_FETCH_SEC = 300
-FETCH_INTERVAL_SEC = 10
+FETCH_INTERVAL_SEC = 5
 
 USE_FIXED_START = False
 FIXED_START = "2025-05-15-16-23-00"
@@ -130,11 +131,10 @@ def fetch_data(
     s_end = end_time.strftime("%Y-%m-%d-%H-%M-%S")
     params = {"device_name": device_name, "start": s_start, "end": s_end}
 
-    params_str = params
-
-    # params_str = str(params)[:50] + \
-    #    "..." if len(str(params)) > 50 else str(params)
-    logger.info("[%s] Запрос: %s", device_name, params_str)
+    # Формируем полный URL для лога
+    query_string = urllib.parse.urlencode(params)
+    full_url = f"{API_URL}?{query_string}"
+    logger.info("[%s] Запрос: %s", device_name, full_url)
     try:
         response = requests.get(API_URL, params=params, timeout=10)
         end_request_time = datetime.now(MY_TZ)
@@ -201,21 +201,19 @@ def load_bracelets() -> List[Dict]:
 
 def format_table(
     measurements: List[Measurement],
-    start_time: Optional[datetime],
-    end_time: Optional[datetime]
+    s_start: str,
+    s_end: str,
+    end_request_time: Optional[datetime]
 ) -> str:
-    """Форматирует данные в таблицу с 8 строками и колонкой Mark."""
+    """Форматирует данные в таблицу с адаптивным количеством строк."""
     headers = ["Mark", "Time", "Device", "HR", "LF/HF", "RMSSD", "SDRR", "SI"]
     table = []
 
-    table.append([
-        "Start",
-        start_time.strftime("%Y-%m-%d %H:%M:%S") if start_time else "-",
-        "", "", "", "", "", ""
-    ])
+    # Start row: server start time
+    table.append(["Start", s_start, "", "", "", "", "", ""])
 
-    measurement_rows = measurements[:5]
-    for idx, measurement in enumerate(measurement_rows, 1):
+    # Measurement rows: all measurements with sequential numbers
+    for idx, measurement in enumerate(measurements, 1):
         table.append([
             str(idx),
             measurement["timestamp"],
@@ -227,22 +225,18 @@ def format_table(
             measurement["si"] or "-"
         ])
 
-    for _ in range(len(measurement_rows), 5):
-        table.append(["", "", "", "", "", "", "", ""])
+    # End row: server end time
+    table.append(["End", s_end, "", "", "", "", "", ""])
 
-    table.append([
-        "End",
-        end_time.strftime("%Y-%m-%d %H:%M:%S") if end_time else "-",
-        "", "", "", "", "", ""
-    ])
-
-    current_time = datetime.now(MY_TZ).strftime("%Y-%m-%d %H:%M:%S")
-    table.append(["Now", current_time, "", "", "", "", "", ""])
+    # Now row: response receipt time
+    now_time = end_request_time.strftime(
+        "%Y-%m-%d %H:%M:%S") if end_request_time else "-"
+    table.append(["Now", now_time, "", "", "", "", "", ""])
 
     return tabulate(
         table,
         headers=headers,
-        tablefmt="grid",
+        tablefmt="simple",
         maxcolwidths=[8, 20, 20, 10, 10, 10, 10, 10]
     )
 
@@ -292,8 +286,9 @@ def save_data(
     history: List[Measurement],
     new_measurements: List[Measurement],
     td_data: Dict,
-    start_time: Optional[datetime],
-    end_time: Optional[datetime]
+    s_start: str,
+    s_end: str,
+    end_request_time: Optional[datetime]
 ) -> None:
     """Сохраняет данные и выводит таблицу."""
     if new_measurements:
@@ -302,11 +297,11 @@ def save_data(
             json.dump(history, file, indent=2)
         logger.info("Добавлено %d записей в %s", len(
             new_measurements), MEASUREMENTS_FILE)
-        if start_time and end_time:
-            table = format_table(new_measurements, start_time, end_time)
-            print(f"\n{table}\n")
-        else:
-            logger.warning("Таблица не выведена: нет временных меток")
+        table = format_table(new_measurements, s_start,
+                             s_end, end_request_time)
+        print(f"\n{table}\n")
+    else:
+        logger.warning("Нет новых измерений, таблица не выведена")
 
     with open(TD_DATA_FILE, "w", encoding="utf-8") as file:
         json.dump(td_data, file, indent=2)
@@ -360,7 +355,12 @@ def main() -> None:
             new_measurements, td_data, start_time, end_time = fetch_and_process_data(
                 session_name, bracelets, current_start, executor
             )
-            save_data(history, new_measurements, td_data, start_time, end_time)
+            # Pass server request times and response time to save_data
+            s_start = start_time.strftime(
+                "%Y-%m-%d-%H-%M-%S") if start_time else "-"
+            s_end = end_time.strftime("%Y-%m-%d-%H-%M-%S") if end_time else "-"
+            save_data(history, new_measurements,
+                      td_data, s_start, s_end, end_time)
 
             logger.info("Цикл завершен: %d записей", len(new_measurements))
             print("")
