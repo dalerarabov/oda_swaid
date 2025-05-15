@@ -1870,5 +1870,59 @@
     "sdrr": 31,
     "si": 559,
     "device_name": "1505_CE:D6:AD:45:ED:75"
+  },
+  {
+    "timestamp": "2025-05-15 15:35:02",
+    "hr": 79,
+    "lf_hf_ratio": 1,
+    "rmssd": 13,
+    "sdrr": 13,
+    "si": 477,
+    "device_name": "1505_CE:D6:AD:45:ED:75"
+  },
+  {
+    "timestamp": "2025-05-15 15:35:03",
+    "hr": 79,
+    "lf_hf_ratio": 1,
+    "rmssd": 21,
+    "sdrr": 13,
+    "si": 379,
+    "device_name": "1505_CE:D6:AD:45:ED:75"
+  },
+  {
+    "timestamp": "2025-05-15 15:35:02",
+    "hr": 79,
+    "lf_hf_ratio": 1,
+    "rmssd": 13,
+    "sdrr": 13,
+    "si": 477,
+    "device_name": "1505_CE:D6:AD:45:ED:75"
+  },
+  {
+    "timestamp": "2025-05-15 15:35:03",
+    "hr": 79,
+    "lf_hf_ratio": 1,
+    "rmssd": 21,
+    "sdrr": 13,
+    "si": 379,
+    "device_name": "1505_CE:D6:AD:45:ED:75"
+  },
+  {
+    "timestamp": "2025-05-15 15:35:02",
+    "hr": 79,
+    "lf_hf_ratio": 1,
+    "rmssd": 13,
+    "sdrr": 13,
+    "si": 477,
+    "device_name": "1505_CE:D6:AD:45:ED:75"
+  },
+  {
+    "timestamp": "2025-05-15 15:35:03",
+    "hr": 79,
+    "lf_hf_ratio": 1,
+    "rmssd": 21,
+    "sdrr": 13,
+    "si": 379,
+    "device_name": "1505_CE:D6:AD:45:ED:75"
   }
 ]
