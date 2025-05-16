@@ -1,14 +1,27 @@
 [
   {
     "mac_address": "CE:D6:AD:45:ED:75",
-    "name": "1330"
-  },
-  {
-    "mac_address": "ED:20:49:77:D0:9F",
-    "name": "1341"
+    "name": "swaid 1330",
+    "process": true
   },
   {
     "mac_address": "D2:99:22:32:B8:EA",
-    "name": "1329"
+    "name": "swaid 1329",
+    "process": true
+  },
+  {
+    "mac_address": "ED:20:49:77:D0:9F",
+    "name": "swaid 1341",
+    "process": true
+  },
+  {
+    "mac_address": "E5:DF:1E:5F:B2:A0",
+    "name": "swaid 1336",
+    "process": true
+  },
+  {
+    "mac_address": "CC:B5:37:14:92:3C",
+    "name": "swaid 1327",
+    "process": true
   }
 ]

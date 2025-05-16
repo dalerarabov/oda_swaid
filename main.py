@@ -117,6 +117,15 @@ def handle_fetch_error(
     return [], start_time, end_time
 
 
+def get_status_color(status_code):
+    if status_code == 200:
+        return "\033[36m"  # Синий (как у вас в примере)
+    elif status_code == 404:
+        return "\033[33m"  # Желтый
+    else:
+        return "\033[0m"    # Сброс (или другой цвет по умолчанию)
+
+
 def fetch_data(
     session_name: str,
     mac_address: str,
@@ -155,7 +164,15 @@ def fetch_data(
     try:
         response = requests.get(API_URL, params=params, timeout=10)
         end_request_time = datetime.now(MY_TZ)
-        logger.info("[%s] Код ответа: %s", device_name, response.status_code)
+
+        print("")
+        logger.info(
+            "%s[%s] Код ответа: %s\033[0m",
+            get_status_color(response.status_code),
+            device_name,
+            response.status_code
+        )
+
         logger.debug("[%s] URL: %s", device_name, response.url)
         response.raise_for_status()
         data = response.json()
@@ -390,6 +407,7 @@ def main() -> None:
     """Запускает основной цикл получения данных с сервера."""
     # ----------------------------------------------------------------------
     # Обработка аргументов командной строки и установка имени сессии
+    print("")
     parser = argparse.ArgumentParser(
         description="Получение данных с сервера")
     parser.add_argument("--session_name", help="Название сессии")
@@ -399,7 +417,9 @@ def main() -> None:
     if not session_name:
         logger.error("Название сессии не задано")
         sys.exit(1)
-    logger.info("Запуск с сессией: %s", session_name)
+    logger.info("\033[31mЗапуск с сессией: %s\033[0m", session_name)
+
+    # print("\033[31mКрасный текст\033[0m")
     # ----------------------------------------------------------------------
     # Загрузка списка браслетов из файла
     bracelets = load_bracelets()
@@ -433,11 +453,14 @@ def main() -> None:
     max_workers = min(len(bracelets), 6)
     logger.info("Пул потоков: %d рабочих", max_workers)
     executor = ThreadPoolExecutor(max_workers=max_workers)
+    print("")
     # ----------------------------------------------------------------------
     # Основной бесконечный цикл получения, обработки и сохранения данных
     try:
         while True:
-            logger.info("Новый цикл для %d браслетов", len(bracelets))
+            # print("\033[32mЗеленый текст\033[0m")
+            logger.info(
+                "\033[32mНовый цикл для %d браслетов\033[0m", len(bracelets))
             # Параллельно запрашиваем данные для всех браслетов
             (new_measurements, td_data, start_time, end_time,
              last_received) = fetch_and_process_data(session_name, bracelets,
