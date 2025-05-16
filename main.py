@@ -1,27 +1,26 @@
 #!/usr/bin/env python3
 """
-Скрипт получает данные с сервера для браслетов, сохраняет их в JSON и обновляет файл для TouchDesigner.
-При Ctrl+C создает бэкапы.
+Получает данные с сервера для браслетов и сохраняет их в JSON.
+Обновляет файл для TouchDesigner. Создаёт резервные копии при Ctrl+C.
 """
 
 import argparse
 import json
+import logging
 import os
 import shutil
 import signal
 import sys
 import time
 import traceback
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Tuple, Optional, TypedDict
-import logging
-from tabulate import tabulate
-import urllib.parse
+from typing import Dict, List, Optional, Tuple, TypedDict
 
 import requests
+from tabulate import tabulate
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] %(levelname)s: %(message)s",
@@ -29,11 +28,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Параметры
 API_URL = "http://157.230.95.209:30003/get_ppg_data"
 MY_TZ = timezone(timedelta(hours=3))
-TIME_FETCH_SEC = 300
-FETCH_INTERVAL_SEC = 5
+TIME_FETCH_SEC = 60         # Длительность окна для выборки данных с сервера
+FETCH_INTERVAL_SEC = 5      # Интервал между запросами
 
 USE_FIXED_START = False
 FIXED_START = "2025-05-15-16-23-00"
@@ -43,16 +41,14 @@ MEASUREMENTS_FILE = "measurements.json"
 TD_DATA_FILE = "td_data.json"
 BACKUP_DIR = "backup"
 
-# Шаблоны по умолчанию
 DEFAULT_BRACELETS = [
     {"mac_address": "CE:D6:AD:45:ED:75", "name": "Bracelet 1"}]
 DEFAULT_MEASUREMENTS: List[Dict] = []
 DEFAULT_TD_DATA: Dict = {}
 
-# Тип для измерений
-
 
 class Measurement(TypedDict):
+    """Тип для представления измерений одного браслета."""
     timestamp: str
     hr: Optional[int]
     lf_hf_ratio: Optional[float]
@@ -63,7 +59,12 @@ class Measurement(TypedDict):
 
 
 def ensure_file(filename: str, default_data: List | Dict) -> None:
-    """Создает файл с данными, если он отсутствует."""
+    """Создаёт файл с данными по умолчанию, если он отсутствует.
+
+    Args:
+        filename: Имя файла для проверки/создания.
+        default_data: Данные для записи в файл в формате JSON.
+    """
     os.makedirs(os.path.dirname(filename) or ".", exist_ok=True)
     if not os.path.exists(filename):
         with open(filename, "w", encoding="utf-8") as file:
@@ -74,7 +75,11 @@ def ensure_file(filename: str, default_data: List | Dict) -> None:
 
 
 def backup_files() -> None:
-    """Создает бэкапы файлов в BACKUP_DIR."""
+    """Создаёт резервные копии основных JSON-файлов.
+
+    Для каждого файла (bracelets, measurements, td_data) создается копия в
+    директории BACKUP_DIR с добавлением временной метки.
+    """
     os.makedirs(BACKUP_DIR, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     for filename in [BRACELETS_FILE, MEASUREMENTS_FILE, TD_DATA_FILE]:
@@ -97,7 +102,17 @@ def handle_fetch_error(
     start_time: datetime,
     end_time: Optional[datetime]
 ) -> Tuple[List[Measurement], datetime, Optional[datetime]]:
-    """Обрабатывает ошибки запроса."""
+    """Обрабатывает ошибки запроса данных.
+
+    Args:
+        device_name: Имя устройства, по которому выполнялся запрос.
+        error: Возникшая ошибка.
+        start_time: Время начала запроса.
+        end_time: Время окончания запроса (может быть None).
+
+    Returns:
+        Кортеж: пустой список измерений, start_time и end_time.
+    """
     logger.error("[%s] Ошибка: %s", device_name, error)
     return [], start_time, end_time
 
@@ -105,58 +120,63 @@ def handle_fetch_error(
 def fetch_data(
     session_name: str,
     mac_address: str,
-    start_override: Optional[datetime] = None
+    start_time: datetime,
+    end_time: datetime
 ) -> Tuple[List[Measurement], datetime, Optional[datetime]]:
-    """
-    Запрашивает данные с сервера.
-    Возвращает: (measurements, start_request_time, end_request_time)
+    """Запрашивает данные с сервера для одного браслета.
+
+    Args:
+        session_name: Название сессии, используется для формирования имени.
+        mac_address: MAC-адрес устройства.
+        start_time: Начало временного окна запроса.
+        end_time: Конец временного окна запроса.
+
+    Returns:
+        Кортеж: (список измерений, время начала запроса, время окончания запроса)
     """
     device_name = f"{session_name}_{mac_address}"
     start_request_time = datetime.now(MY_TZ)
     end_request_time = None
 
+    # Если MAC-адрес не задан, пропускаем запрос
     if not mac_address:
         logger.warning("Пропущен запрос для %s: нет MAC", device_name)
         return [], start_request_time, end_request_time
 
-    if start_override:
-        start_time = start_override
-        end_time = start_time + timedelta(seconds=TIME_FETCH_SEC)
-    else:
-        now = datetime.now(MY_TZ)
-        start_time = now - timedelta(seconds=TIME_FETCH_SEC)
-        end_time = now
-
+    # Форматируем временные метки под формат запроса
     s_start = start_time.strftime("%Y-%m-%d-%H-%M-%S")
     s_end = end_time.strftime("%Y-%m-%d-%H-%M-%S")
     params = {"device_name": device_name, "start": s_start, "end": s_end}
 
-    # Формируем полный URL для лога
     query_string = urllib.parse.urlencode(params)
     full_url = f"{API_URL}?{query_string}"
     logger.info("[%s] Запрос: %s", device_name, full_url)
+
     try:
         response = requests.get(API_URL, params=params, timeout=10)
         end_request_time = datetime.now(MY_TZ)
         logger.info("[%s] Код ответа: %s", device_name, response.status_code)
         logger.debug("[%s] URL: %s", device_name, response.url)
-
         response.raise_for_status()
         data = response.json()
         logger.debug("[%s] Данные: %s", device_name,
                      json.dumps(data, indent=2))
-    except requests.RequestException as error:
-        return handle_fetch_error(device_name, error, start_request_time, end_request_time)
-    except json.JSONDecodeError as error:
-        return handle_fetch_error(device_name, error, start_request_time, end_request_time)
+    except (requests.RequestException, json.JSONDecodeError) as error:
+        return handle_fetch_error(device_name, error,
+                                  start_request_time, end_request_time)
 
+    # Если сервер сообщает об отсутствии данных, возвращаем пустой список
     if data.get("message") == "No data found for the specified device.":
         logger.info("[%s] Данные не найдены", device_name)
         return [], start_request_time, end_request_time
-    if not any(data.get(key) for key in ["hr", "lf_hf_ratio", "rmssd", "sdrr", "si"]):
+
+    # Проверяем, что хотя бы одно из требуемых полей содержит данные
+    if not any(data.get(key)
+               for key in ["hr", "lf_hf_ratio", "rmssd", "sdrr", "si"]):
         logger.warning("[%s] Пустой набор данных", device_name)
         return [], start_request_time, end_request_time
 
+    # Формируем список измерений с использованием zip
     measurements: List[Measurement] = [
         {
             "timestamp": ts,
@@ -168,33 +188,35 @@ def fetch_data(
             "device_name": device_name,
         }
         for hr, lf_hf, rmssd, sdrr, si, ts in zip(
-            data.get("hr", []),
-            data.get("lf_hf_ratio", []),
-            data.get("rmssd", []),
-            data.get("sdrr", []),
-            data.get("si", []),
-            data.get("time", [])
+            data.get("hr", []), data.get("lf_hf_ratio", []),
+            data.get("rmssd", []), data.get("sdrr", []),
+            data.get("si", []), data.get("time", [])
         )
     ]
-    logger.info("[%s] Получено %d измерений", device_name, len(measurements))
+    logger.info("[%s] Получено %d измерений",
+                device_name, len(measurements))
     return measurements, start_request_time, end_request_time
 
 
 def load_bracelets() -> List[Dict]:
-    """Загружает список браслетов из файла."""
+    """Загружает список браслетов из файла BRACELETS_FILE.
+
+    Returns:
+        Список словарей с информацией о браслетах.
+    """
     try:
         with open(BRACELETS_FILE, "r", encoding="utf-8") as file:
             bracelets = json.load(file)
         logger.info("Загружено %d браслетов из %s",
                     len(bracelets), BRACELETS_FILE)
+        # Логгируем каждый браслет из списка
         for bracelet in bracelets:
-            logger.info(
-                " - %s (%s)",
-                bracelet.get("name", "Без имени"),
-                bracelet.get("mac_address", "Без MAC")
-            )
+            logger.info(" - %s (%s)",
+                        bracelet.get("name", "Без имени"),
+                        bracelet.get("mac_address", "Без MAC"))
         return bracelets
-    except (FileNotFoundError, json.JSONDecodeError, PermissionError) as error:
+    except (FileNotFoundError, json.JSONDecodeError,
+            PermissionError) as error:
         logger.error("Ошибка загрузки %s: %s", BRACELETS_FILE, error)
         sys.exit(1)
 
@@ -205,14 +227,23 @@ def format_table(
     s_end: str,
     end_request_time: Optional[datetime]
 ) -> str:
-    """Форматирует данные в таблицу с адаптивным количеством строк."""
+    """Форматирует данные в таблицу для вывода.
+
+    Args:
+        measurements: Список измерений.
+        s_start: Строковое представление начала временного окна.
+        s_end: Строковое представление конца временного окна.
+        end_request_time: Время получения ответа сервера.
+
+    Returns:
+        Строка, содержащая табличное представление данных.
+    """
     headers = ["Mark", "Time", "Device", "HR", "LF/HF", "RMSSD", "SDRR", "SI"]
     table = []
-
-    # Start row: server start time
+    # Добавляем строку с началом окна выборки
     table.append(["Start", s_start, "", "", "", "", "", ""])
 
-    # Measurement rows: all measurements with sequential numbers
+    # Для каждого измерения формируем номер, время, устройство и показатели
     for idx, measurement in enumerate(measurements, 1):
         table.append([
             str(idx),
@@ -225,20 +256,14 @@ def format_table(
             measurement["si"] or "-"
         ])
 
-    # End row: server end time
+    # Добавляем строку с концом окна выборки
     table.append(["End", s_end, "", "", "", "", "", ""])
-
-    # Now row: response receipt time
-    now_time = end_request_time.strftime(
-        "%Y-%m-%d %H:%M:%S") if end_request_time else "-"
+    # Добавляем строку с временем получения ответа сервера
+    now_time = (end_request_time.strftime("%Y-%m-%d %H:%M:%S")
+                if end_request_time else "-")
     table.append(["Now", now_time, "", "", "", "", "", ""])
-
-    return tabulate(
-        table,
-        headers=headers,
-        tablefmt="simple",
-        maxcolwidths=[8, 20, 20, 10, 10, 10, 10, 10]
-    )
+    return tabulate(table, headers=headers, tablefmt="simple",
+                    maxcolwidths=[8, 20, 20, 10, 10, 10, 10, 10])
 
 
 def fetch_and_process_data(
@@ -246,40 +271,62 @@ def fetch_and_process_data(
     bracelets: List[Dict],
     current_start: Optional[datetime],
     executor: ThreadPoolExecutor
-) -> Tuple[List[Measurement], Dict, Optional[datetime], Optional[datetime]]:
-    """Выполняет запросы к серверу."""
+) -> Tuple[List[Measurement], Dict, datetime, datetime]:
+    """Параллельно запрашивает данные для всех браслетов.
+
+    Вычисляет общее временное окно и передаёт его во все запросы.
+    Собирает результаты и формирует словарь последних измерений.
+
+    Args:
+        session_name: Название сессии.
+        bracelets: Список браслетов.
+        current_start: Начало временного окна (если задано).
+        executor: Пул потоков для параллельного выполнения.
+
+    Returns:
+        Кортеж из:
+          - общего списка измерений,
+          - словаря с последними измерениями по устройствам,
+          - start_time и end_time, использованных для запросов.
+    """
     all_measurements: List[Measurement] = []
     td_data: Dict = {}
-    earliest_start = None
-    latest_end = None
 
+    # Вычисляем общее окно времени для всех браслетов
+    if current_start:
+        start_time = current_start
+        end_time = start_time + timedelta(seconds=TIME_FETCH_SEC)
+    else:
+        now = datetime.now(MY_TZ)
+        start_time = now - timedelta(seconds=TIME_FETCH_SEC)
+        end_time = now
+
+    logger.info("Расчет временного окна: start = %s, end = %s",
+                start_time, end_time)
     logger.info("Запуск пула для %d браслетов", len(bracelets))
-    futures = {
-        executor.submit(fetch_data, session_name, b.get("mac_address", ""), current_start): b
-        for b in bracelets if b.get("mac_address")
-    }  # pylint: disable=cell-var-from-loop
 
+    # Запускаем параллельное выполнение запросов для каждого браслета
+    futures = {
+        executor.submit(fetch_data, session_name, b.get("mac_address", ""),
+                        start_time, end_time): b
+        for b in bracelets if b.get("mac_address")
+    }
+
+    # Обрабатываем завершённые задачи по мере их готовности
     for future in as_completed(futures):
         bracelet = futures[future]
         device_name = f"{session_name}_{bracelet.get('mac_address')}"
         try:
-            measurements, start_time, end_time = future.result()
+            measurements, req_start, req_end = future.result()
             if measurements:
                 all_measurements.extend(measurements)
+                # Сохраняем последнее измерение для данного устройства
                 td_data[device_name] = measurements[-1]
-                if earliest_start is None or (start_time and start_time < earliest_start):
-                    earliest_start = start_time
-                if latest_end is None or (end_time and end_time > latest_end):
-                    latest_end = end_time
         except Exception as error:
-            logger.error(
-                "[%s] Ошибка обработки: %s\n%s",
-                device_name,
-                error,
-                "".join(traceback.format_tb(error.__traceback__))
-            )
-
-    return all_measurements, td_data, earliest_start, latest_end
+            logger.error("[%s] Ошибка обработки: %s\n%s",
+                         device_name, error,
+                         "".join(traceback.format_tb(error.__traceback__)))
+    return all_measurements, td_data, start_time, end_time
 
 
 def save_data(
@@ -290,47 +337,65 @@ def save_data(
     s_end: str,
     end_request_time: Optional[datetime]
 ) -> None:
-    """Сохраняет данные и выводит таблицу."""
+    """Сохраняет измерения в историю и обновляет файлы.
+
+    Если есть новые измерения, они добавляются к истории и записываются в файл.
+    Также формируется таблица с результатами и обновляется файл td_data.
+
+    Args:
+        history: Существующая история измерений.
+        new_measurements: Новые измерения за цикл.
+        td_data: Словарь последних значений для каждого устройства.
+        s_start: Строковое представление начала окна.
+        s_end: Строковое представление конца окна.
+        end_request_time: Время получения ответа.
+    """
     if new_measurements:
         history.extend(new_measurements)
         with open(MEASUREMENTS_FILE, "w", encoding="utf-8") as file:
             json.dump(history, file, indent=2)
-        logger.info("Добавлено %d записей в %s", len(
-            new_measurements), MEASUREMENTS_FILE)
+        logger.info("Добавлено %d записей в %s",
+                    len(new_measurements), MEASUREMENTS_FILE)
+        # Формируем и выводим таблицу с новыми измерениями
         table = format_table(new_measurements, s_start,
                              s_end, end_request_time)
         print(f"\n{table}\n")
     else:
         logger.warning("Нет новых измерений, таблица не выведена")
-
     with open(TD_DATA_FILE, "w", encoding="utf-8") as file:
         json.dump(td_data, file, indent=2)
 
 
 def main() -> None:
-    """Основной цикл программы."""
-    parser = argparse.ArgumentParser(description="Получение данных с сервера")
+    """Запускает основной цикл получения данных с сервера."""
+    parser = argparse.ArgumentParser(
+        description="Получение данных с сервера")
     parser.add_argument("--session_name", help="Название сессии")
     args = parser.parse_args()
 
+    # Получаем название сессии из аргументов или через ввод с клавиатуры
     session_name = args.session_name or input(
         "Введите название сессии: ").strip()
     if not session_name:
         logger.error("Название сессии не задано")
         sys.exit(1)
 
+    # Логируем начало сессии
     logger.info("Запуск с сессией: %s", session_name)
 
+    # Загружаем список браслетов из файла
     bracelets = load_bracelets()
     if not bracelets:
         logger.error("Список браслетов пуст")
         sys.exit(1)
 
+    # Устанавливаем начальное время запроса.
+    # Если включён фиксированный режим, пробуем разобрать фиксированное время
     current_start = None
     if USE_FIXED_START:
         try:
-            current_start = datetime.strptime(
-                FIXED_START, "%Y-%m-%d-%H-%M-%S").replace(tzinfo=MY_TZ)
+            current_start = datetime.strptime(FIXED_START, "%Y-%m-%d-%H-%M-%S")\
+                .replace(tzinfo=MY_TZ)
             logger.info("Фиксированное время: %s", FIXED_START)
         except ValueError as error:
             logger.error("Ошибка формата FIXED_START: %s", error)
@@ -338,6 +403,7 @@ def main() -> None:
     else:
         logger.info("Используется текущее время")
 
+    # Загружаем историю измерений или создаем новый список, если файл недоступен
     try:
         with open(MEASUREMENTS_FILE, "r", encoding="utf-8") as file:
             history: List[Measurement] = json.load(file)
@@ -346,28 +412,38 @@ def main() -> None:
         history: List[Measurement] = []
         logger.info("Файл %s не найден, создан пустой", MEASUREMENTS_FILE)
 
-    max_workers = min(len(bracelets), 5)
+    # Определяем количество потоков, максимум до 6, и создаем пул потоков
+    max_workers = min(len(bracelets), 6)
     logger.info("Пул потоков: %d рабочих", max_workers)
     executor = ThreadPoolExecutor(max_workers=max_workers)
+
     try:
+        # Основной бесконечный цикл запроса данных
         while True:
             logger.info("Новый цикл для %d браслетов", len(bracelets))
-            new_measurements, td_data, start_time, end_time = fetch_and_process_data(
-                session_name, bracelets, current_start, executor
-            )
-            # Pass server request times and response time to save_data
-            s_start = start_time.strftime(
-                "%Y-%m-%d-%H-%M-%S") if start_time else "-"
-            s_end = end_time.strftime("%Y-%m-%d-%H-%M-%S") if end_time else "-"
+            # Запускаем параллельный запрос данных для всех браслетов
+            new_measurements, td_data, start_time, end_time = \
+                fetch_and_process_data(session_name, bracelets, current_start,
+                                       executor)
+            # Форматируем временные метки для вывода результатов
+            s_start = (start_time.strftime("%Y-%m-%d %H:%M:%S")
+                       if start_time else "-")
+            s_end = (end_time.strftime("%Y-%m-%d %H:%M:%S")
+                     if end_time else "-")
+            # Сохраняем новые измерения и выводим таблицу в консоль
             save_data(history, new_measurements,
                       td_data, s_start, s_end, end_time)
-
             logger.info("Цикл завершен: %d записей", len(new_measurements))
             print("")
+
+            # Если используется фиксированный режим,
+            # то обновляем время запроса для следующего цикла
             if USE_FIXED_START and current_start:
                 current_start += timedelta(seconds=TIME_FETCH_SEC)
+            # Задаем паузу перед следующим циклом запросов
             time.sleep(FETCH_INTERVAL_SEC)
     except KeyboardInterrupt:
+        # Обработка прерывания (Ctrl+C)
         logger.info("Завершение: закрытие пула")
         executor.shutdown(wait=True)
         raise
@@ -377,7 +453,7 @@ def main() -> None:
 
 
 def signal_handler(_sig: int, _frame: Optional[object]) -> None:
-    """Обработчик Ctrl+C."""
+    """Обрабатывает сигнал SIGINT и создаёт резервные копии файлов."""
     logger.info("Ctrl+C: создание бэкапов")
     backup_files()
     sys.exit(0)
