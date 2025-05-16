@@ -1,20 +1,11 @@
 {
-  "1605_D2:99:22:32:B8:EA": {
-    "timestamp": "2025-05-16 12:50:16",
-    "hr": 78,
-    "lf_hf_ratio": 1,
-    "rmssd": 28,
-    "sdrr": 19,
-    "si": 334,
-    "device_name": "1605_D2:99:22:32:B8:EA"
-  },
   "1605_CE:D6:AD:45:ED:75": {
-    "timestamp": "2025-05-16 12:50:29",
-    "hr": 78,
-    "lf_hf_ratio": 2,
-    "rmssd": 42,
-    "sdrr": 26,
-    "si": 653,
+    "timestamp": "2025-05-16 14:02:18",
+    "hr": 73,
+    "lf_hf_ratio": 1,
+    "rmssd": 82,
+    "sdrr": 70,
+    "si": 269,
     "device_name": "1605_CE:D6:AD:45:ED:75"
   }
 }

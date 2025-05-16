@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Получает данные с сервера для браслетов и сохраняет их в JSON.
-Обновляет файл для TouchDesigner. Создаёт резервные копии при Ctrl+C.
+Получает данные с сервера для браслетов, сохраняет их в JSON и обновляет файл
+для TouchDesigner. Создаёт резервные копии при Ctrl+C.
 """
 
 import argparse
@@ -77,7 +77,7 @@ def ensure_file(filename: str, default_data: List | Dict) -> None:
 def backup_files() -> None:
     """Создаёт резервные копии основных JSON-файлов.
 
-    Для каждого файла (bracelets, measurements, td_data) создается копия в
+    Для каждого файла (bracelets, measurements, td_data) создаётся копия в
     директории BACKUP_DIR с добавлением временной метки.
     """
     os.makedirs(BACKUP_DIR, exist_ok=True)
@@ -105,7 +105,7 @@ def handle_fetch_error(
     """Обрабатывает ошибки запроса данных.
 
     Args:
-        device_name: Имя устройства, по которому выполнялся запрос.
+        device_name: Имя устройства для запроса.
         error: Возникшая ошибка.
         start_time: Время начала запроса.
         end_time: Время окончания запроса (может быть None).
@@ -126,24 +126,24 @@ def fetch_data(
     """Запрашивает данные с сервера для одного браслета.
 
     Args:
-        session_name: Название сессии, используется для формирования имени.
+        session_name: Название сессии для формирования имени.
         mac_address: MAC-адрес устройства.
-        start_time: Начало временного окна запроса.
-        end_time: Конец временного окна запроса.
+        start_time: Начало окна запроса.
+        end_time: Конец окна запроса.
 
     Returns:
-        Кортеж: (список измерений, время начала запроса, время окончания запроса)
+        Кортеж: (список измерений, время начала запроса, время окончания запроса).
     """
     device_name = f"{session_name}_{mac_address}"
     start_request_time = datetime.now(MY_TZ)
     end_request_time = None
 
-    # Если MAC-адрес не задан, пропускаем запрос
+    # Если MAC-адрес не задан, пропускаем этот запрос
     if not mac_address:
         logger.warning("Пропущен запрос для %s: нет MAC", device_name)
         return [], start_request_time, end_request_time
 
-    # Форматируем временные метки под формат запроса
+    # Форматируем временные метки для передачи в параметры запроса
     s_start = start_time.strftime("%Y-%m-%d-%H-%M-%S")
     s_end = end_time.strftime("%Y-%m-%d-%H-%M-%S")
     params = {"device_name": device_name, "start": s_start, "end": s_end}
@@ -165,18 +165,18 @@ def fetch_data(
         return handle_fetch_error(device_name, error,
                                   start_request_time, end_request_time)
 
-    # Если сервер сообщает об отсутствии данных, возвращаем пустой список
+    # Если данные не найдены, возвращаем пустой список измерений
     if data.get("message") == "No data found for the specified device.":
         logger.info("[%s] Данные не найдены", device_name)
         return [], start_request_time, end_request_time
 
-    # Проверяем, что хотя бы одно из требуемых полей содержит данные
+    # Проверяем, что хотя бы одно требуемое поле содержит данные
     if not any(data.get(key)
                for key in ["hr", "lf_hf_ratio", "rmssd", "sdrr", "si"]):
         logger.warning("[%s] Пустой набор данных", device_name)
         return [], start_request_time, end_request_time
 
-    # Формируем список измерений с использованием zip
+    # Формируем список измерений, объединяя списки значений и временные метки
     measurements: List[Measurement] = [
         {
             "timestamp": ts,
@@ -209,7 +209,7 @@ def load_bracelets() -> List[Dict]:
             bracelets = json.load(file)
         logger.info("Загружено %d браслетов из %s",
                     len(bracelets), BRACELETS_FILE)
-        # Логгируем каждый браслет из списка
+        # Логируем каждый браслет из списка
         for bracelet in bracelets:
             logger.info(" - %s (%s)",
                         bracelet.get("name", "Без имени"),
@@ -225,25 +225,26 @@ def format_table(
     measurements: List[Measurement],
     s_start: str,
     s_end: str,
-    end_request_time: Optional[datetime]
+    s_received: str
 ) -> str:
-    """Форматирует данные в таблицу для вывода.
+    """Форматирует данные измерений в таблицу для вывода.
 
     Args:
         measurements: Список измерений.
-        s_start: Строковое представление начала временного окна.
-        s_end: Строковое представление конца временного окна.
-        end_request_time: Время получения ответа сервера.
+        s_start: Строковое представление начала окна.
+        s_end: Строковое представление конца окна.
+        s_received: Строковое представление последнего ответа.
 
     Returns:
         Строка, содержащая табличное представление данных.
     """
-    headers = ["Mark", "Time", "Device", "HR", "LF/HF", "RMSSD", "SDRR", "SI"]
+    headers = ["Mark", "Time", "Device", "HR", "LF/HF", "RMSSD",
+               "SDRR", "SI"]
     table = []
-    # Добавляем строку с началом окна выборки
+    # Первая строка: начало окна выборки
     table.append(["Start", s_start, "", "", "", "", "", ""])
 
-    # Для каждого измерения формируем номер, время, устройство и показатели
+    # Строки для каждого измерения
     for idx, measurement in enumerate(measurements, 1):
         table.append([
             str(idx),
@@ -256,14 +257,12 @@ def format_table(
             measurement["si"] or "-"
         ])
 
-    # Добавляем строку с концом окна выборки
+    # Строка: конец окна выборки
     table.append(["End", s_end, "", "", "", "", "", ""])
-    # Добавляем строку с временем получения ответа сервера
-    now_time = (end_request_time.strftime("%Y-%m-%d %H:%M:%S")
-                if end_request_time else "-")
-    table.append(["Now", now_time, "", "", "", "", "", ""])
+    # Строка: время получения последнего ответа сервера
+    table.append(["Received", s_received, "", "", "", "", "", ""])
     return tabulate(table, headers=headers, tablefmt="simple",
-                    maxcolwidths=[8, 20, 20, 10, 10, 10, 10, 10])
+                    maxcolwidths=[8, 25, 20, 10, 10, 10, 10, 10])
 
 
 def fetch_and_process_data(
@@ -271,28 +270,31 @@ def fetch_and_process_data(
     bracelets: List[Dict],
     current_start: Optional[datetime],
     executor: ThreadPoolExecutor
-) -> Tuple[List[Measurement], Dict, datetime, datetime]:
+) -> Tuple[List[Measurement], Dict, datetime, datetime, datetime]:
     """Параллельно запрашивает данные для всех браслетов.
 
-    Вычисляет общее временное окно и передаёт его во все запросы.
-    Собирает результаты и формирует словарь последних измерений.
+    Вычисляет общее окно времени и передаёт его в запросы. Собирает
+    результаты, формирует словарь последних измерений, а также возвращает
+    время последнего полученного ответа от сервера.
 
     Args:
         session_name: Название сессии.
         bracelets: Список браслетов.
-        current_start: Начало временного окна (если задано).
-        executor: Пул потоков для параллельного выполнения.
+        current_start: Начало окна запроса (если задано).
+        executor: Пул для параллельного выполнения запросов.
 
     Returns:
         Кортеж из:
-          - общего списка измерений,
-          - словаря с последними измерениями по устройствам,
-          - start_time и end_time, использованных для запросов.
+          - списка измерений,
+          - словаря последних измерений,
+          - start_time и end_time для запроса,
+          - времени последнего ответа от сервера.
     """
     all_measurements: List[Measurement] = []
     td_data: Dict = {}
+    last_received: Optional[datetime] = None
 
-    # Вычисляем общее окно времени для всех браслетов
+    # Вычисляем общее окно времени для всех запросов
     if current_start:
         start_time = current_start
         end_time = start_time + timedelta(seconds=TIME_FETCH_SEC)
@@ -301,32 +303,51 @@ def fetch_and_process_data(
         start_time = now - timedelta(seconds=TIME_FETCH_SEC)
         end_time = now
 
-    logger.info("Расчет временного окна: start = %s, end = %s",
-                start_time, end_time)
+    logger.info("Расчет окна: start = %s, end = %s", start_time, end_time)
     logger.info("Запуск пула для %d браслетов", len(bracelets))
 
-    # Запускаем параллельное выполнение запросов для каждого браслета
+    # Отправляем параллельные запросы для каждого браслета
     futures = {
         executor.submit(fetch_data, session_name, b.get("mac_address", ""),
                         start_time, end_time): b
         for b in bracelets if b.get("mac_address")
     }
 
-    # Обрабатываем завершённые задачи по мере их готовности
+    # Обрабатываем завершённые задачи
     for future in as_completed(futures):
+        logger.info("Ожидание завершения задачи...")
         bracelet = futures[future]
         device_name = f"{session_name}_{bracelet.get('mac_address')}"
+        logger.info(
+            "Обработка завершённой задачи для устройства: %s", device_name)
         try:
             measurements, req_start, req_end = future.result()
+
             if measurements:
+                logger.info("Получены данные от %s: %d измерений",
+                            device_name, len(measurements))
                 all_measurements.extend(measurements)
-                # Сохраняем последнее измерение для данного устройства
                 td_data[device_name] = measurements[-1]
+                logger.info(
+                    "Последнее измерение для %s сохранено", device_name)
+
+            # Обновляем время последнего ответа (если получено)
+            if req_end and (last_received is None or req_end > last_received):
+                last_received = req_end
+                logger.info(
+                    "Обновлено время последнего ответа сервера: %s", last_received)
+
         except Exception as error:
             logger.error("[%s] Ошибка обработки: %s\n%s",
                          device_name, error,
                          "".join(traceback.format_tb(error.__traceback__)))
-    return all_measurements, td_data, start_time, end_time
+
+    # Если ни один ответ не получен, используем end_time
+    if last_received is None:
+        last_received = end_time
+        logger.warning(
+            "Не удалось получить ни одного ответа от сервера, используем end_time: %s", last_received)
+    return all_measurements, td_data, start_time, end_time, last_received
 
 
 def save_data(
@@ -335,20 +356,20 @@ def save_data(
     td_data: Dict,
     s_start: str,
     s_end: str,
-    end_request_time: Optional[datetime]
+    s_received: str
 ) -> None:
     """Сохраняет измерения в историю и обновляет файлы.
 
-    Если есть новые измерения, они добавляются к истории и записываются в файл.
-    Также формируется таблица с результатами и обновляется файл td_data.
+    Если новые измерения есть, они добавляются к истории, затем
+    данные записываются в файл, и выводится таблица с временными метками.
 
     Args:
         history: Существующая история измерений.
         new_measurements: Новые измерения за цикл.
         td_data: Словарь последних значений для каждого устройства.
-        s_start: Строковое представление начала окна.
-        s_end: Строковое представление конца окна.
-        end_request_time: Время получения ответа.
+        s_start: Строка начала окна.
+        s_end: Строка конца окна.
+        s_received: Строка последнего ответа от сервера.
     """
     if new_measurements:
         history.extend(new_measurements)
@@ -356,9 +377,8 @@ def save_data(
             json.dump(history, file, indent=2)
         logger.info("Добавлено %d записей в %s",
                     len(new_measurements), MEASUREMENTS_FILE)
-        # Формируем и выводим таблицу с новыми измерениями
-        table = format_table(new_measurements, s_start,
-                             s_end, end_request_time)
+        # Формируем таблицу с измерениями и временными метками
+        table = format_table(new_measurements, s_start, s_end, s_received)
         print(f"\n{table}\n")
     else:
         logger.warning("Нет новых измерений, таблица не выведена")
@@ -368,29 +388,26 @@ def save_data(
 
 def main() -> None:
     """Запускает основной цикл получения данных с сервера."""
+    # ----------------------------------------------------------------------
+    # Обработка аргументов командной строки и установка имени сессии
     parser = argparse.ArgumentParser(
         description="Получение данных с сервера")
     parser.add_argument("--session_name", help="Название сессии")
     args = parser.parse_args()
-
-    # Получаем название сессии из аргументов или через ввод с клавиатуры
-    session_name = args.session_name or input(
-        "Введите название сессии: ").strip()
+    session_name = (args.session_name or
+                    input("Введите название сессии: ").strip())
     if not session_name:
         logger.error("Название сессии не задано")
         sys.exit(1)
-
-    # Логируем начало сессии
     logger.info("Запуск с сессией: %s", session_name)
-
-    # Загружаем список браслетов из файла
+    # ----------------------------------------------------------------------
+    # Загрузка списка браслетов из файла
     bracelets = load_bracelets()
     if not bracelets:
         logger.error("Список браслетов пуст")
         sys.exit(1)
-
-    # Устанавливаем начальное время запроса.
-    # Если включён фиксированный режим, пробуем разобрать фиксированное время
+    # ----------------------------------------------------------------------
+    # Определение времени запроса: фиксированное или текущее
     current_start = None
     if USE_FIXED_START:
         try:
@@ -402,48 +419,48 @@ def main() -> None:
             sys.exit(1)
     else:
         logger.info("Используется текущее время")
-
-    # Загружаем историю измерений или создаем новый список, если файл недоступен
+    # ----------------------------------------------------------------------
+    # Загрузка истории измерений или создание пустого списка
     try:
         with open(MEASUREMENTS_FILE, "r", encoding="utf-8") as file:
             history: List[Measurement] = json.load(file)
         logger.info("Загружено %d измерений", len(history))
     except (FileNotFoundError, json.JSONDecodeError):
-        history: List[Measurement] = []
+        history = []
         logger.info("Файл %s не найден, создан пустой", MEASUREMENTS_FILE)
-
-    # Определяем количество потоков, максимум до 6, и создаем пул потоков
+    # ----------------------------------------------------------------------
+    # Настройка пула потоков: число потоков ограничено числом браслетов и 6
     max_workers = min(len(bracelets), 6)
     logger.info("Пул потоков: %d рабочих", max_workers)
     executor = ThreadPoolExecutor(max_workers=max_workers)
-
+    # ----------------------------------------------------------------------
+    # Основной бесконечный цикл получения, обработки и сохранения данных
     try:
-        # Основной бесконечный цикл запроса данных
         while True:
             logger.info("Новый цикл для %d браслетов", len(bracelets))
-            # Запускаем параллельный запрос данных для всех браслетов
-            new_measurements, td_data, start_time, end_time = \
-                fetch_and_process_data(session_name, bracelets, current_start,
-                                       executor)
-            # Форматируем временные метки для вывода результатов
-            s_start = (start_time.strftime("%Y-%m-%d %H:%M:%S")
+            # Параллельно запрашиваем данные для всех браслетов
+            (new_measurements, td_data, start_time, end_time,
+             last_received) = fetch_and_process_data(session_name, bracelets,
+                                                     current_start, executor)
+            # Форматируем временные метки для вывода таблицы
+            s_start = (start_time.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
                        if start_time else "-")
-            s_end = (end_time.strftime("%Y-%m-%d %H:%M:%S")
+            s_end = (end_time.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
                      if end_time else "-")
-            # Сохраняем новые измерения и выводим таблицу в консоль
-            save_data(history, new_measurements,
-                      td_data, s_start, s_end, end_time)
+            s_received = (last_received.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                          if last_received else "-")
+            # Сохраняем данные и выводим таблицу с метками времени
+            save_data(history, new_measurements, td_data,
+                      s_start, s_end, s_received)
             logger.info("Цикл завершен: %d записей", len(new_measurements))
             print("")
-
-            # Если используется фиксированный режим,
-            # то обновляем время запроса для следующего цикла
+            # Если используется фиксированный режим, обновляем время запроса
             if USE_FIXED_START and current_start:
                 current_start += timedelta(seconds=TIME_FETCH_SEC)
-            # Задаем паузу перед следующим циклом запросов
+            # Пауза перед следующим циклом запросов
             time.sleep(FETCH_INTERVAL_SEC)
     except KeyboardInterrupt:
-        # Обработка прерывания (Ctrl+C)
+        # При Ctrl+C корректно завершаем работу, закрывая пул потоков
         logger.info("Завершение: закрытие пула")
         executor.shutdown(wait=True)
         raise
