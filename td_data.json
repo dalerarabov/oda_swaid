@@ -1,101 +1,90 @@
 [
   {
     "session": 1905,
-    "device_mac": "D2:99:22:32:B8:EA",
-    "device_name": "swaid 1329",
-    "timestamp": "2025-05-19 09:15:16",
-    "hr": 88,
-    "lf_hf_ratio": 0,
-    "rmssd": 43,
-    "sdrr": 42,
-    "si": 341
-  },
-  {
-    "session": 1905,
-    "device_mac": "D2:99:22:32:B8:EA",
-    "device_name": "swaid 1329",
-    "timestamp": "2025-05-19 09:15:22",
-    "hr": 85,
-    "lf_hf_ratio": 0,
-    "rmssd": 24,
-    "sdrr": 20,
-    "si": 356
-  },
-  {
-    "session": 1905,
-    "device_mac": "D2:99:22:32:B8:EA",
-    "device_name": "swaid 1329",
-    "timestamp": "2025-05-19 09:15:28",
+    "device_mac": "CE:D6:AD:45:ED:75",
+    "device_name": "swaid 1330",
+    "timestamp": "2025-05-19 10:26:33",
     "hr": 87,
     "lf_hf_ratio": 0,
-    "rmssd": 0,
-    "sdrr": 0,
-    "si": 432
+    "rmssd": 19,
+    "sdrr": 16,
+    "si": 387
   },
   {
     "session": 1905,
-    "device_mac": "D2:99:22:32:B8:EA",
-    "device_name": "swaid 1329",
-    "timestamp": "2025-05-19 09:15:34",
-    "hr": 93,
-    "lf_hf_ratio": 0,
-    "rmssd": 0,
-    "sdrr": 0,
-    "si": 414
-  },
-  {
-    "session": 1905,
-    "device_mac": "D2:99:22:32:B8:EA",
-    "device_name": "swaid 1329",
-    "timestamp": "2025-05-19 09:15:40",
-    "hr": 85,
-    "lf_hf_ratio": 0,
-    "rmssd": 0,
-    "sdrr": 0,
-    "si": 415
-  },
-  {
-    "session": 1905,
-    "device_mac": "D2:99:22:32:B8:EA",
-    "device_name": "swaid 1329",
-    "timestamp": "2025-05-19 09:15:46",
-    "hr": 92,
-    "lf_hf_ratio": 0,
-    "rmssd": 49,
-    "sdrr": 48,
-    "si": 310
-  },
-  {
-    "session": 1905,
-    "device_mac": "D2:99:22:32:B8:EA",
-    "device_name": "swaid 1329",
-    "timestamp": "2025-05-19 09:15:52",
-    "hr": 114,
-    "lf_hf_ratio": 0,
-    "rmssd": 57,
-    "sdrr": 44,
-    "si": 494
-  },
-  {
-    "session": 1905,
-    "device_mac": "D2:99:22:32:B8:EA",
-    "device_name": "swaid 1329",
-    "timestamp": "2025-05-19 09:15:58",
+    "device_mac": "CE:D6:AD:45:ED:75",
+    "device_name": "swaid 1330",
+    "timestamp": "2025-05-19 10:26:39",
     "hr": 88,
     "lf_hf_ratio": 0,
-    "rmssd": 68,
-    "sdrr": 61,
-    "si": 286
+    "rmssd": 23,
+    "sdrr": 18,
+    "si": 401
   },
   {
     "session": 1905,
-    "device_mac": "CC:B5:37:14:92:3C",
-    "device_name": "swaid 1327",
-    "timestamp": "2025-05-19 09:15:16",
-    "hr": 65,
-    "lf_hf_ratio": 1,
-    "rmssd": 76,
-    "sdrr": 63,
-    "si": 218
+    "device_mac": "CE:D6:AD:45:ED:75",
+    "device_name": "swaid 1330",
+    "timestamp": "2025-05-19 10:26:45",
+    "hr": 88,
+    "lf_hf_ratio": 0,
+    "rmssd": 0,
+    "sdrr": 0,
+    "si": 379
+  },
+  {
+    "session": 1905,
+    "device_mac": "CE:D6:AD:45:ED:75",
+    "device_name": "swaid 1330",
+    "timestamp": "2025-05-19 10:26:52",
+    "hr": 89,
+    "lf_hf_ratio": 0,
+    "rmssd": 23,
+    "sdrr": 19,
+    "si": 362
+  },
+  {
+    "session": 1905,
+    "device_mac": "CE:D6:AD:45:ED:75",
+    "device_name": "swaid 1330",
+    "timestamp": "2025-05-19 10:26:58",
+    "hr": 88,
+    "lf_hf_ratio": 0,
+    "rmssd": 0,
+    "sdrr": 0,
+    "si": 349
+  },
+  {
+    "session": 1905,
+    "device_mac": "CE:D6:AD:45:ED:75",
+    "device_name": "swaid 1330",
+    "timestamp": "2025-05-19 10:27:04",
+    "hr": 93,
+    "lf_hf_ratio": 0,
+    "rmssd": 7,
+    "sdrr": 6,
+    "si": 413
+  },
+  {
+    "session": 1905,
+    "device_mac": "CE:D6:AD:45:ED:75",
+    "device_name": "swaid 1330",
+    "timestamp": "2025-05-19 10:27:10",
+    "hr": 97,
+    "lf_hf_ratio": 0,
+    "rmssd": 0,
+    "sdrr": 0,
+    "si": 718
+  },
+  {
+    "session": 1905,
+    "device_mac": "CE:D6:AD:45:ED:75",
+    "device_name": "swaid 1330",
+    "timestamp": "2025-05-19 10:27:16",
+    "hr": 97,
+    "lf_hf_ratio": 0,
+    "rmssd": 4,
+    "sdrr": 3,
+    "si": 530
   }
 ]
