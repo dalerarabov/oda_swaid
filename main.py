@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 API_URL = "http://157.230.95.209:30003/get_ppg_data"
 MY_TZ = timezone(timedelta(hours=3))
 TIME_FETCH_SEC = 60         # Длительность окна для выборки данных с сервера
-FETCH_INTERVAL_SEC = 5      # Интервал между запросами
+FETCH_INTERVAL_SEC = 4      # Интервал между запросами
 
 USE_FIXED_START = False
 FIXED_START = "2025-05-15-16-23-00"

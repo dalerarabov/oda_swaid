@@ -23,5 +23,10 @@
     "mac_address": "CC:B5:37:14:92:3C",
     "name": "swaid 1327",
     "process": true
+  },
+  {
+    "mac_address": "F7:C6:14:3E:82:39",
+    "name": "swaid 1319",
+    "process": true
   }
 ]
