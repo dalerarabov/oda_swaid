@@ -1,27 +1,59 @@
+#!/usr/bin/env python3
+"""
+TUI Dashboard для отображения данных устройств с гибкой настройкой вывода.
+Пользователь может задавать:
+  - Список устройств (таблиц), которые выводятся на экран.
+  - Количество строк для данных в таблице (панель автоматически подстраивается).
+  - Перечень столбцов и их порядок, а также ширину столбцов.
+  - Варианты компоновки панелей (например, 1x6, 6x1, 3x2, 2x3).
+"""
+
 import json
 import time
 import datetime
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
-from rich.columns import Columns
 from rich.text import Text
 from rich import box
 
 console = Console()
 
-# Глобальные параметры для задания размеров таблиц
-DATA_ROW_COUNT: int = 7  # число строк данных в таблице (без заголовка)
-# высота панели = число строк данных + строка заголовка таблицы
-PANEL_HEIGHT: int = DATA_ROW_COUNT + 7
-PANEL_WIDTH: int = 60  # ширина всех блоков
 
-###############################################################################
-# Цветовое форматирование ячеек
-###############################################################################
+@dataclass
+class DashboardConfig:
+    data_row_count: int = 7
+    panel_width: int = 60
+    columns_order: List[str] = field(
+        # default_factory=lambda: ["Time", "HR", "LF/HF", "RMSSD", "SDRR", "SI"]
+        default_factory=lambda: ["Time", "HR", "SI"]
+    )
+    columns_width: Dict[str, int] = field(
+        default_factory=lambda: {
+            "Time": 15,
+            "HR": 8,
+            "LF/HF": 7,
+            "RMSSD": 8,
+            "SDRR": 7,
+            "SI": 8,
+        }
+    )
+    devices_to_display: List[str] = field(
+        default_factory=lambda: [
+            "swaid 1319",
+            "swaid 1341",
+            "swaid 1330",
+            "swaid 1327",
+            "swaid 1329",
+            "swaid 1336",
+        ]
+    )
+    grid_layout: Tuple[int, int] = (2, 6)  # (rows, columns)
+    include_reference_panel: bool = False
 
 
 def get_color_for_param(param: str, value: Any) -> Optional[str]:
@@ -55,9 +87,9 @@ def get_color_for_param(param: str, value: Any) -> Optional[str]:
         else:
             return "red"
     elif param == "RMSSD":
-        if val < 20:
+        if val < 35:
             return "red"
-        elif 20 <= val < 50:
+        elif 35 <= val < 50:
             return "yellow"
         else:
             return "green"
@@ -69,9 +101,9 @@ def get_color_for_param(param: str, value: Any) -> Optional[str]:
         else:
             return "green"
     elif param == "SI":
-        if val < 50:
+        if val < 150:
             return "green"
-        elif 50 <= val < 100:
+        elif 150 <= val < 500:
             return "yellow"
         else:
             return "red"
@@ -90,17 +122,11 @@ def formatted_cell(param: str, value: Any) -> str:
         return f"[{color}]{value}[/{color}]"
     return str(value)
 
-###############################################################################
-# Загрузка и группировка данных
-###############################################################################
-
 
 def load_data(file_path: str = "td_data.json") -> List[Dict[str, Any]]:
     """
     Загружает данные из JSON-файла.
-
-    При возникновении ошибки загрузки функция выводит сообщение в консоль
-    и возвращает пустой список.
+    При возникновении ошибки загрузки выводит сообщение и возвращает пустой список.
     """
     try:
         with open(file_path, "r", encoding="utf-8") as file:
@@ -113,8 +139,7 @@ def load_data(file_path: str = "td_data.json") -> List[Dict[str, Any]]:
 def group_data_by_device(data: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     """
     Группирует записи по значению поля 'device_name'.
-
-    Если для записи отсутствует поле 'device_name', используется значение 'Unknown'.
+    Если поле отсутствует, используется 'Unknown'.
     """
     grouped: Dict[str, List[Dict[str, Any]]] = {}
     for entry in data:
@@ -122,38 +147,24 @@ def group_data_by_device(data: List[Dict[str, Any]]) -> Dict[str, List[Dict[str,
         grouped.setdefault(device_name, []).append(entry)
     return grouped
 
-###############################################################################
-# Построение таблиц и панелей устройств
-###############################################################################
 
-
-def build_device_table(data_points: List[Dict[str, Any]]) -> Table:
+def build_device_table(
+    data_points: List[Dict[str, Any]], config: DashboardConfig
+) -> Table:
     """
-    Создает Rich-таблицу для отображения данных устройства.
-
-    Таблица имеет фиксированную ширину столбцов и выводит ровно DATA_ROW_COUNT строк
-    данных. Если данных меньше, недостающие строки заполняются пустыми значениями.
-
-    Столбцы:
-      - Time  : ширина 15 символов
-      - HR    : ширина 8 символов
-      - LF/HF : ширина 7 символов
-      - RMSSD : ширина 8 символов
-      - SDRR  : ширина 7 символов
-      - SI    : ширина 8 символов
+    Создаёт таблицу для отображения данных устройства.
+    Таблица выводит ровно config.data_row_count рядов данных,
+    заполняя недостающие строки пустыми значениями.
+    Столбцы и их порядок определяются конфигурацией.
     """
     table = Table(
-        show_header=True,
-        header_style="bold magenta",
-        expand=False,
-        box=box.SIMPLE,
+        show_header=True, header_style="bold magenta", expand=False, box=box.SIMPLE
     )
-    table.add_column("Time", justify="center", no_wrap=True, width=15)
-    table.add_column("HR", justify="center", no_wrap=True, width=8)
-    table.add_column("LF/HF", justify="center", width=7)
-    table.add_column("RMSSD", justify="center", width=8)
-    table.add_column("SDRR", justify="center", width=7)
-    table.add_column("SI", justify="center", width=8)
+
+    # Добавляем столбцы согласно конфигурации
+    for col in config.columns_order:
+        width = config.columns_width.get(col)
+        table.add_column(col, justify="center", no_wrap=True, width=width)
 
     sorted_points: List[Dict[str, Any]] = []
     try:
@@ -168,60 +179,55 @@ def build_device_table(data_points: List[Dict[str, Any]]) -> Table:
         console.print(f"[red]Ошибка сортировки данных:[/red] {error}")
         sorted_points = data_points or []
 
-    # Берем последние DATA_ROW_COUNT записей
-    rows_to_display = sorted_points[-DATA_ROW_COUNT:] if sorted_points else []
+    rows_to_display = sorted_points[-config.data_row_count:] if sorted_points else []
+
+    # Сопоставление столбцов с ключами данных
+    column_key_map = {
+        "Time": "timestamp",
+        "HR": "hr",
+        "LF/HF": "lf_hf_ratio",
+        "RMSSD": "rmssd",
+        "SDRR": "sdrr",
+        "SI": "si",
+    }
 
     for point in rows_to_display:
-        try:
-            ts = (
-                datetime.datetime.strptime(
-                    point.get("timestamp", ""), "%Y-%m-%d %H:%M:%S")
-                .strftime("%H:%M:%S")
-                if point.get("timestamp")
-                else ""
-            )
-        except Exception:
-            ts = point.get("timestamp", "")
-        table.add_row(
-            formatted_cell("Time", ts),
-            formatted_cell("HR", point.get("hr", "")),
-            formatted_cell("LF/HF", point.get("lf_hf_ratio", "")),
-            formatted_cell("RMSSD", point.get("rmssd", "")),
-            formatted_cell("SDRR", point.get("sdrr", "")),
-            formatted_cell("SI", point.get("si", "")),
-        )
-    # Если записей меньше требуемого количества, дополняем пустыми строками
-    for _ in range(DATA_ROW_COUNT - len(rows_to_display)):
-        table.add_row("", "", "", "", "", "")
+        row_values = []
+        for col in config.columns_order:
+            key = column_key_map.get(col, col)
+            value = point.get(key, "")
+            if col == "Time" and value:
+                try:
+                    formatted_time = datetime.datetime.strptime(
+                        value, "%Y-%m-%d %H:%M:%S"
+                    ).strftime("%H:%M:%S")
+                    value = formatted_time
+                except Exception:
+                    pass
+            row_values.append(formatted_cell(col, value))
+        table.add_row(*row_values)
+
+    # Если записей меньше требуемого числа, дополняем пустыми строками
+    for _ in range(config.data_row_count - len(rows_to_display)):
+        table.add_row(*["" for _ in config.columns_order])
+
     return table
 
 
-def build_device_panel(device_name: str, data_points: List[Dict[str, Any]]) -> Panel:
+def build_device_panel(
+    device_name: str, data_points: List[Dict[str, Any]], config: DashboardConfig
+) -> Panel:
     """
-    Оборачивает таблицу устройства в панель с фиксированными размерами.
-
-    Панель имеет ширину PANEL_WIDTH и высоту PANEL_HEIGHT,
-    где PANEL_HEIGHT = DATA_ROW_COUNT + 1 (учитывается строка заголовка таблицы).
+    Оборачивает таблицу устройства в панель с фиксированной шириной.
+    Высота панели автоматически определяется содержимым.
     """
-    content = build_device_table(data_points)
-    return Panel(
-        content,
-        title=device_name,
-        width=PANEL_WIDTH,
-        height=PANEL_HEIGHT,
-        expand=False,
-    )
-
-###############################################################################
-# Построение панели со справкой и пустых панелей
-###############################################################################
+    content = build_device_table(data_points, config)
+    return Panel(content, title=device_name, width=config.panel_width, expand=False)
 
 
-def build_reference_panel() -> Panel:
+def build_reference_panel(config: DashboardConfig) -> Panel:
     """
-    Создает панель со справочной информацией по параметрам и их цветовой разметке.
-
-    Панель имеет фиксированные размеры: ширина PANEL_WIDTH, высота PANEL_HEIGHT.
+    Создаёт панель со справочной информацией по параметрам и их цветовой разметке.
     """
     reference_text = (
         "[bold underline]Справочная информация:[/bold underline]\n"
@@ -234,63 +240,41 @@ def build_reference_panel() -> Panel:
     return Panel(
         Text.from_markup(reference_text),
         title="Справка",
-        width=PANEL_WIDTH,
-        height=PANEL_HEIGHT,
+        width=config.panel_width,
         expand=False,
     )
 
 
-def build_empty_panel() -> Panel:
+def build_empty_panel(config: DashboardConfig) -> Panel:
     """
-    Возвращает пустую панель фиксированного размера.
-
-    Используется для заполнения пустых ячеек в макете.
+    Возвращает пустую панель с фиксированной шириной для заполнения пустых ячеек.
     """
-    return Panel("", width=PANEL_WIDTH, height=PANEL_HEIGHT, expand=False, box=box.SIMPLE)
-
-###############################################################################
-# Построение общего макета (3×3)
-###############################################################################
+    return Panel("", width=config.panel_width, expand=False, box=box.SIMPLE)
 
 
-def build_layout(
-    data: List[Dict[str, Any]], session: str, current_time: str, countdown: int
+def build_generic_layout(
+    panels: List[Panel],
+    config: DashboardConfig,
+    session: str,
+    current_time: str,
+    countdown: int,
 ) -> Table:
     """
-    Формирует общий макет TUI с заголовком и сеткой 3×3 блоков.
-
-    Расположение блоков:
-      1-я строка: [Устройство 1, Устройство 2, Справка]
-      2-я строка: [Устройство 3, Устройство 4, пустой блок]
-      3-я строка: [Устройство 5, Устройство 6, пустой блок]
-
-    Заголовок (с информацией о сессии, времени и обратном отсчете) не входит в размер блоков.
+    Формирует общий макет с заголовком и сеткой, определяемой конфигурацией.
+    Заголовок содержит информацию о сессии, времени и обратном отсчёте.
+    Если переданное число панелей меньше требуемых ячеек сетки,
+    оставшиеся заполняются пустыми панелями.
     """
-    grouped_data = group_data_by_device(data)
-    devices = [
-        "swaid 1319",
-        "swaid 1341",
-        "swaid 1330",
-        "swaid 1327",
-        "swaid 1329",
-        "swaid 1336",
-    ]
-    device_panels = [
-        build_device_panel(device, grouped_data.get(device, [])) for device in devices
-    ]
-
-    # Формируем ряды:
-    # 1-я строка: устройство 1, устройство 2, справочная панель.
-    # 2-я строка: устройство 3, устройство 4, пустая панель.
-    # 3-я строка: устройство 5, устройство 6, пустая панель.
-    row1 = [device_panels[0], device_panels[1], build_reference_panel()]
-    row2 = [device_panels[2], device_panels[3], build_empty_panel()]
-    row3 = [device_panels[4], device_panels[5], build_empty_panel()]
-
+    grid_rows, grid_cols = config.grid_layout
     grid = Table.grid(padding=(0, 1))
-    grid.add_row(*row1)
-    grid.add_row(*row2)
-    grid.add_row(*row3)
+    total_cells = grid_rows * grid_cols
+    panels_extended = panels + [
+        build_empty_panel(config) for _ in range(total_cells - len(panels))
+    ]
+
+    for row in range(grid_rows):
+        row_items = panels_extended[row * grid_cols:(row + 1) * grid_cols]
+        grid.add_row(*row_items)
 
     header = Table.grid(expand=True)
     header.add_column(justify="left")
@@ -307,19 +291,14 @@ def build_layout(
     layout.add_row(grid)
     return layout
 
-###############################################################################
-# Основной цикл обновления TUI
-###############################################################################
-
 
 def main() -> None:
     """
     Запускает цикл обновления TUI с периодической перезагрузкой данных.
-
-    Интервал обновления задается в секундах.
     """
-    update_interval: int = 1  # Интервал обновления данных в секундах
+    update_interval: int = 3  # Интервал обновления данных в секундах
     last_update: float = time.time() - update_interval
+    config = DashboardConfig()  # Здесь можно изменить значения для кастомизации
     data: List[Dict[str, Any]] = load_data()
     session: str = data[0].get("session", "N/A") if data else "N/A"
 
@@ -335,7 +314,18 @@ def main() -> None:
                     last_update = now
 
                 current_time: str = datetime.datetime.now().strftime("%H:%M:%S")
-                layout = build_layout(data, session, current_time, countdown)
+                grouped_data = group_data_by_device(data)
+                device_panels = [
+                    build_device_panel(
+                        device, grouped_data.get(device, []), config)
+                    for device in config.devices_to_display
+                ]
+                if config.include_reference_panel:
+                    device_panels.append(build_reference_panel(config))
+
+                layout = build_generic_layout(
+                    device_panels, config, session, current_time, countdown
+                )
                 live.update(layout)
                 time.sleep(1)
         except KeyboardInterrupt:
