@@ -1,0 +1,52 @@
+def get_color_for_param(param: str, value: Any) -> Optional[str]:
+    """
+    Возвращает цветовую разметку для указанного параметра по пороговым значениям.
+
+    Пороговые значения:
+      - HR: <60 → blue, 60–100 → green, >100 → red.
+      - LF/HF: <1 → green, 1–2 → yellow, >2 → red.
+      - RMSSD: <20 → red, 20–50 → yellow, ≥50 → green.
+      - SDRR: <50 → red, 50–100 → yellow, ≥100 → green.
+      - SI: <50 → green, 50–100 → yellow, ≥100 → red.
+    """
+    try:
+        val = float(value)
+    except (ValueError, TypeError):
+        return None
+
+    if param == "HR":
+        if val < 60:
+            return "blue"
+        elif 60 <= val <= 100:
+            return "green"
+        else:
+            return "red"
+    elif param == "LF/HF":
+        if val < 1:
+            return "green"
+        elif 1 <= val <= 2:
+            return "yellow"
+        else:
+            return "red"
+    elif param == "RMSSD":
+        if val < 35:
+            return "red"
+        elif 35 <= val < 50:
+            return "yellow"
+        else:
+            return "green"
+    elif param == "SDRR":
+        if val < 50:
+            return "red"
+        elif 50 <= val < 100:
+            return "yellow"
+        else:
+            return "green"
+    elif param == "SI":
+        if val < 150:
+            return "green"
+        elif 150 <= val < 500:
+            return "yellow"
+        else:
+            return "red"
+    return None
