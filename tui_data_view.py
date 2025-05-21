@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 """
-TUI Dashboard для отображения данных устройств с гибкой настройкой вывода.
-Пользователь может задавать:
-  - Список устройств (таблиц), которые выводятся на экран.
-  - Количество строк для данных в таблице (панель автоматически подстраивается).
-  - Перечень столбцов и их порядок, а также ширину столбцов.
-  - Варианты компоновки панелей (например, 1x6, 6x1, 3x2, 2x3).
+TUI Dashboard для отображения графиков данных устройств в реальном времени.
+Пользователь по-прежнему может задавать:
+  - Список устройств (панели), которые выводятся на экран.
+  - Ширину панелей (на основе которой адаптируется ширина графика).
+  - Варианты компоновки панелей (например, 2x6, 3x2 и т.д.).
+
+Визуализация графика:
+  - Ось X – временная шкала в секундах, показывающая последние 80 секунд.
+    Правый край помечен как Now с текущим временем (ЧЧ:ММ:СС), а отметки на 20, 40, 60, 80 секунд назад фиксированы.
+  - Ось Y (левая) – параметр HR (55–200 уд./мин).
+  - Ось Y (правая) – параметр SI (50–900 усл. ед.).
+  - На графике выводятся только данные, попадающие в окно [Now - 80, Now].
+  - Старые данные автоматически удаляются, а новые добавляются с корректной временной привязкой.
+  - График адаптируется под ширину окна терминала, а значения на оси Y выводятся реже (каждый второй ряд) с округлением.
 """
 
 import json
@@ -17,6 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from rich.console import Console
 from rich.live import Live
 from rich.panel import Panel
+# используется для построения макета, а не самого графика
 from rich.table import Table
 from rich.text import Text
 from rich import box
@@ -26,22 +35,9 @@ console = Console()
 
 @dataclass
 class DashboardConfig:
-    data_row_count: int = 7
+    # Начальное значение, которое будет перенастроено динамически в цикле обновления.
     panel_width: int = 60
-    columns_order: List[str] = field(
-        # default_factory=lambda: ["Time", "HR", "LF/HF", "RMSSD", "SDRR", "SI"]
-        default_factory=lambda: ["Time", "HR", "SI"]
-    )
-    columns_width: Dict[str, int] = field(
-        default_factory=lambda: {
-            "Time": 15,
-            "HR": 8,
-            "LF/HF": 7,
-            "RMSSD": 8,
-            "SDRR": 7,
-            "SI": 8,
-        }
-    )
+    graph_height: int = 10  # высота графика (число строк)
     devices_to_display: List[str] = field(
         default_factory=lambda: [
             "swaid 1319",
@@ -52,75 +48,9 @@ class DashboardConfig:
             "swaid 1336",
         ]
     )
-    grid_layout: Tuple[int, int] = (2, 6)  # (rows, columns)
+    grid_layout: Tuple[int, int] = (2, 6)  # (строк, колонок)
+    # можно добавить справочную панель, если нужно
     include_reference_panel: bool = False
-
-
-def get_color_for_param(param: str, value: Any) -> Optional[str]:
-    """
-    Возвращает цветовую разметку для указанного параметра по пороговым значениям.
-
-    Пороговые значения:
-      - HR: <60 → blue, 60–100 → green, >100 → red.
-      - LF/HF: <1 → green, 1–2 → yellow, >2 → red.
-      - RMSSD: <20 → red, 20–50 → yellow, ≥50 → green.
-      - SDRR: <50 → red, 50–100 → yellow, ≥100 → green.
-      - SI: <50 → green, 50–100 → yellow, ≥100 → red.
-    """
-    try:
-        val = float(value)
-    except (ValueError, TypeError):
-        return None
-
-    if param == "HR":
-        if val < 60:
-            return "blue"
-        elif 60 <= val <= 100:
-            return "green"
-        else:
-            return "red"
-    elif param == "LF/HF":
-        if val < 1:
-            return "green"
-        elif 1 <= val <= 2:
-            return "yellow"
-        else:
-            return "red"
-    elif param == "RMSSD":
-        if val < 35:
-            return "red"
-        elif 35 <= val < 50:
-            return "yellow"
-        else:
-            return "green"
-    elif param == "SDRR":
-        if val < 50:
-            return "red"
-        elif 50 <= val < 100:
-            return "yellow"
-        else:
-            return "green"
-    elif param == "SI":
-        if val < 150:
-            return "green"
-        elif 150 <= val < 500:
-            return "yellow"
-        else:
-            return "red"
-    return None
-
-
-def formatted_cell(param: str, value: Any) -> str:
-    """
-    Форматирует значение ячейки с цветовой разметкой для заданного параметра.
-    Если значение пустое или не поддаётся преобразованию, возвращает пустую строку.
-    """
-    if not value:
-        return ""
-    color = get_color_for_param(param, value)
-    if color:
-        return f"[{color}]{value}[/{color}]"
-    return str(value)
 
 
 def load_data(file_path: str = "td_data.json") -> List[Dict[str, Any]]:
@@ -148,106 +78,128 @@ def group_data_by_device(data: List[Dict[str, Any]]) -> Dict[str, List[Dict[str,
     return grouped
 
 
-def build_device_table(
-    data_points: List[Dict[str, Any]], config: DashboardConfig
-) -> Table:
+def build_device_graph(device_name: str, data_points: List[Dict[str, Any]], config: DashboardConfig) -> Panel:
     """
-    Создаёт таблицу для отображения данных устройства.
-    Таблица выводит ровно config.data_row_count рядов данных,
-    заполняя недостающие строки пустыми значениями.
-    Столбцы и их порядок определяются конфигурацией.
+    Строит график для устройства на основе данных за последние 80 секунд.
+    По оси X изображён временной интервал: от (Now - 80 сек) до Now.
+    По оси Y накладываются два графика:
+      - HR (уд./мин) (левая шкала, диапазон 55–200): отмечается символом [red]*[/red]
+      - SI (услов. ед.) (правая шкала, диапазон 50–900): отмечается символом [cyan]o[/cyan]
+    Если два значения попадают в одну и ту же ячейку, ставится комбинированный символ [bold magenta]X[/bold magenta].
     """
-    table = Table(
-        show_header=True, header_style="bold magenta", expand=False, box=box.SIMPLE
-    )
+    now = datetime.datetime.now()
+    # Задаём отступы для подписей по осям
+    left_margin = 6    # для меток HR
+    right_margin = 6   # для меток SI
+    drawing_width = config.panel_width - left_margin - right_margin
+    plot_height = config.graph_height
 
-    # Добавляем столбцы согласно конфигурации
-    for col in config.columns_order:
-        width = config.columns_width.get(col)
-        table.add_column(col, justify="center", no_wrap=True, width=width)
+    # Инициализируем пустой графический "холст"
+    grid = [[" " for _ in range(drawing_width)] for _ in range(plot_height)]
 
-    sorted_points: List[Dict[str, Any]] = []
-    try:
-        if data_points:
-            sorted_points = sorted(
-                data_points,
-                key=lambda x: datetime.datetime.strptime(
-                    x.get("timestamp", ""), "%Y-%m-%d %H:%M:%S"
-                ),
-            )
-    except Exception as error:
-        console.print(f"[red]Ошибка сортировки данных:[/red] {error}")
-        sorted_points = data_points or []
+    # Отбираем данные, попадающие в окно последних 80 секунд
+    valid_points = []
+    for point in data_points:
+        ts_str = point.get("timestamp", "")
+        try:
+            ts = datetime.datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            continue
+        diff = (now - ts).total_seconds()
+        if 0 <= diff <= 80:
+            valid_points.append((diff, point))
 
-    rows_to_display = sorted_points[-config.data_row_count:] if sorted_points else []
+    # Для каждого измерения вычисляем координаты графика
+    for diff, point in valid_points:
+        # Ось X: 0 соответствует now-80 сек, drawing_width-1 — now
+        x = int((80 - diff) / 80 * (drawing_width - 1))
 
-    # Сопоставление столбцов с ключами данных
-    column_key_map = {
-        "Time": "timestamp",
-        "HR": "hr",
-        "LF/HF": "lf_hf_ratio",
-        "RMSSD": "rmssd",
-        "SDRR": "sdrr",
-        "SI": "si",
-    }
+        # Обработка HR
+        hr_val = point.get("hr")
+        if hr_val is not None:
+            try:
+                hr = float(hr_val)
+                norm_hr = (hr - 55) / (200 - 55)
+                norm_hr = max(0.0, min(1.0, norm_hr))
+                y_hr = plot_height - 1 - int(norm_hr * (plot_height - 1))
+            except Exception:
+                y_hr = None
+            if y_hr is not None:
+                current_cell = grid[y_hr][x]
+                if current_cell.strip() == "":
+                    grid[y_hr][x] = "[red]*[/red]"
+                else:
+                    grid[y_hr][x] = "[bold magenta]X[/bold magenta]"
 
-    for point in rows_to_display:
-        row_values = []
-        for col in config.columns_order:
-            key = column_key_map.get(col, col)
-            value = point.get(key, "")
-            if col == "Time" and value:
-                try:
-                    formatted_time = datetime.datetime.strptime(
-                        value, "%Y-%m-%d %H:%M:%S"
-                    ).strftime("%H:%M:%S")
-                    value = formatted_time
-                except Exception:
-                    pass
-            row_values.append(formatted_cell(col, value))
-        table.add_row(*row_values)
+        # Обработка SI
+        si_val = point.get("si")
+        if si_val is not None:
+            try:
+                si = float(si_val)
+                norm_si = (si - 50) / (900 - 50)
+                norm_si = max(0.0, min(1.0, norm_si))
+                y_si = plot_height - 1 - int(norm_si * (plot_height - 1))
+            except Exception:
+                y_si = None
+            if y_si is not None:
+                current_cell = grid[y_si][x]
+                if current_cell.strip() == "":
+                    grid[y_si][x] = "[cyan]o[/cyan]"
+                else:
+                    grid[y_si][x] = "[bold magenta]X[/bold magenta]"
 
-    # Если записей меньше требуемого числа, дополняем пустыми строками
-    for _ in range(config.data_row_count - len(rows_to_display)):
-        table.add_row(*["" for _ in config.columns_order])
+    # Формирование строк для графика с подписями по оси Y.
+    # Подписи выводятся только для каждой второй строки (остальные строки оставляются пустыми)
+    lines = []
+    for row in range(plot_height):
+        hr_label_val = 200 - ((200 - 55) / (plot_height - 1)) * row
+        si_label_val = 900 - ((900 - 50) / (plot_height - 1)) * row
+        if row % 2 == 0:
+            left_label = f"{round(hr_label_val):>3}"
+            right_label = f"{round(si_label_val):>3}"
+        else:
+            left_label = "   "
+            right_label = "   "
+        content_line = "".join(grid[row])
+        lines.append(f"{left_label} {content_line} {right_label}")
 
-    return table
+    # Рисуем ось X с горизонтальной линией и фиксированными метками
+    x_axis_line = " " * left_margin + "-" * drawing_width
+    tick_values = [80, 60, 40, 20, 0]
+    tick_labels = ["-80", "-60", "-40", "-20",
+                   datetime.datetime.now().strftime("%H:%M:%S")]
+    tick_line_list = [" " for _ in range(drawing_width)]
+    for tick, label in zip(tick_values, tick_labels):
+        pos = int((80 - tick) / 80 * (drawing_width - 1))
+        for i, ch in enumerate(label):
+            if pos + i < drawing_width:
+                tick_line_list[pos + i] = ch
+    tick_line = " " * left_margin + "".join(tick_line_list)
+    axis_label = "Время: сек"
+    offset = left_margin + (drawing_width - len(axis_label)) // 2
+    x_axis_label_line = " " * offset + axis_label
 
-
-def build_device_panel(
-    device_name: str, data_points: List[Dict[str, Any]], config: DashboardConfig
-) -> Panel:
-    """
-    Оборачивает таблицу устройства в панель с фиксированной шириной.
-    Высота панели автоматически определяется содержимым.
-    """
-    content = build_device_table(data_points, config)
-    return Panel(content, title=device_name, width=config.panel_width, expand=False)
+    graph_text = "\n".join(lines + [x_axis_line, tick_line, x_axis_label_line])
+    return Panel(graph_text, title=device_name, width=config.panel_width, expand=False)
 
 
 def build_reference_panel(config: DashboardConfig) -> Panel:
     """
-    Создаёт панель со справочной информацией по параметрам и их цветовой разметке.
+    Создаёт панель со справочной информацией по графику.
     """
     reference_text = (
-        "[bold underline]Справочная информация:[/bold underline]\n"
-        "[bold]HR:[/bold] 60–100 [green]зеленый[/green], <60 [blue]синий[/blue], >100 [red]красный[/red]\n"
-        "[bold]LF/HF:[/bold] <1 [green]зеленый[/green], 1–2 [yellow]желтый[/yellow], >2 [red]красный[/red]\n"
-        "[bold]RMSSD:[/bold] <20 [red]красный[/red], 20–50 [yellow]желтый[/yellow], ≥50 [green]зеленый[/green]\n"
-        "[bold]SDRR:[/bold] <50 [red]красный[/red], 50–100 [yellow]желтый[/yellow], ≥100 [green]зеленый[/green]\n"
-        "[bold]SI:[/bold] <50 [green]зеленый[/green], 50–100 [yellow]желтый[/yellow], ≥100 [red]красный[/red]"
+        "[bold underline]Справка по графику:[/bold underline]\n"
+        "Ось X: последние 80 секунд. Отметки: -80, -60, -40, -20, Now (текущее время)\n"
+        "Левая ось Y: HR, 55–200 уд./мин (отмечается символом [red]*[/red])\n"
+        "Правая ось Y: SI, 50–900 усл. ед. (отмечается символом [cyan]o[/cyan])\n"
+        "Если оба показателя попадают в одну ячейку, отображается [bold magenta]X[/bold magenta]."
     )
-    return Panel(
-        Text.from_markup(reference_text),
-        title="Справка",
-        width=config.panel_width,
-        expand=False,
-    )
+    return Panel(Text.from_markup(reference_text), title="Справка", width=config.panel_width, expand=False)
 
 
 def build_empty_panel(config: DashboardConfig) -> Panel:
     """
-    Возвращает пустую панель с фиксированной шириной для заполнения пустых ячеек.
+    Возвращает пустую панель для заполнения пустых ячеек в макете.
     """
     return Panel("", width=config.panel_width, expand=False, box=box.SIMPLE)
 
@@ -261,19 +213,18 @@ def build_generic_layout(
 ) -> Table:
     """
     Формирует общий макет с заголовком и сеткой, определяемой конфигурацией.
-    Заголовок содержит информацию о сессии, времени и обратном отсчёте.
-    Если переданное число панелей меньше требуемых ячеек сетки,
+    Заголовок содержит информацию о сессии, времени и оставшемся обратном отсчёте.
+    Если число панелей меньше количества ячеек в сетке,
     оставшиеся заполняются пустыми панелями.
     """
     grid_rows, grid_cols = config.grid_layout
     grid = Table.grid(padding=(0, 1))
     total_cells = grid_rows * grid_cols
-    panels_extended = panels + [
-        build_empty_panel(config) for _ in range(total_cells - len(panels))
-    ]
+    panels_extended = panels + \
+        [build_empty_panel(config) for _ in range(total_cells - len(panels))]
 
     for row in range(grid_rows):
-        row_items = panels_extended[row * grid_cols:(row + 1) * grid_cols]
+        row_items = panels_extended[row * grid_cols: (row + 1) * grid_cols]
         grid.add_row(*row_items)
 
     header = Table.grid(expand=True)
@@ -295,17 +246,18 @@ def build_generic_layout(
 def main() -> None:
     """
     Запускает цикл обновления TUI с периодической перезагрузкой данных.
+    Вместо таблиц выводятся графики, обновляемые в реальном времени.
     """
-    update_interval: int = 3  # Интервал обновления данных в секундах
+    update_interval: int = 3  # интервал обновления данных в секундах
     last_update: float = time.time() - update_interval
-    config = DashboardConfig()  # Здесь можно изменить значения для кастомизации
+    config = DashboardConfig()  # начальные настройки (ширина, список устройств и т.д.)
     data: List[Dict[str, Any]] = load_data()
     session: str = data[0].get("session", "N/A") if data else "N/A"
 
     with Live(console=console, refresh_per_second=4, screen=True) as live:
         try:
             while True:
-                now: float = time.time()
+                now = time.time()
                 countdown: int = max(0, update_interval -
                                      int(now - last_update))
                 if countdown <= 0:
@@ -313,10 +265,17 @@ def main() -> None:
                     session = data[0].get("session", "N/A") if data else "N/A"
                     last_update = now
 
-                current_time: str = datetime.datetime.now().strftime("%H:%M:%S")
+                # Адаптируем ширину панелей под текущий размер терминала.
+                grid_rows, grid_cols = config.grid_layout
+                term_width = console.size.width
+                # Рассчитываем новую ширину для каждой панели с учетом небольшого отступа.
+                adjusted_panel_width = max(30, (term_width // grid_cols) - 2)
+                config.panel_width = adjusted_panel_width
+
+                current_time_str = datetime.datetime.now().strftime("%H:%M:%S")
                 grouped_data = group_data_by_device(data)
                 device_panels = [
-                    build_device_panel(
+                    build_device_graph(
                         device, grouped_data.get(device, []), config)
                     for device in config.devices_to_display
                 ]
@@ -324,8 +283,7 @@ def main() -> None:
                     device_panels.append(build_reference_panel(config))
 
                 layout = build_generic_layout(
-                    device_panels, config, session, current_time, countdown
-                )
+                    device_panels, config, session, current_time_str, countdown)
                 live.update(layout)
                 time.sleep(1)
         except KeyboardInterrupt:
